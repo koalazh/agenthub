@@ -1,0 +1,34 @@
+# Environment
+.env
+
+# Python build artifacts
+src/*.egg-info/
+src/agenthub.egg-info/
+
+# Virtual environments
+.venv/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Caching
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Build outputs
+out/
+dist/
+
+# Project docs (can be regenerated)
+rules/
+docs/
+
+# Claude Code
+.claude/
+
+# Root level docs
+CLAUDE.md
+progress.md
