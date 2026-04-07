@@ -76,6 +76,15 @@ def get_builtin_skills_dir() -> Path:
     return Path(os.environ.get("BUILTIN_SKILLS_DIR", DEFAULT_BUILTIN_SKILLS_DIR))
 
 
+def get_default_model() -> str:
+    """Get the default model from MODEL_NAME environment variable.
+
+    Returns:
+        Model string in "provider:model-name" format, or fallback default.
+    """
+    return os.environ.get("MODEL_NAME", "anthropic:claude-sonnet-4-6")
+
+
 def resolve_model(model: str | "BaseChatModel") -> "BaseChatModel":
     """Resolve a model string or instance to a BaseChatModel.
 

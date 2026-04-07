@@ -16,7 +16,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
 from agenthub.backend.agenthub_backend import AgentHubBackend
-from agenthub.core.config import get_config, resolve_model
+from agenthub.core.config import get_config, get_default_model, resolve_model
 from agenthub.core.errors import LLMError, ParseError
 from agenthub.core.errors import TimeoutError as AgentHubTimeoutError
 from agenthub.core.types import (
@@ -394,7 +394,7 @@ def get_executor() -> SkillExecutor:
     """Get the global SkillExecutor instance."""
     global _executor
     if _executor is None:
-        _executor = SkillExecutor()
+        _executor = SkillExecutor(model=get_default_model())
     return _executor
 
 
