@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from pokemon.master import get_pokemon
+from pokemon.master import catch_em_all, get_pokemon
 
 
 def hash_string(s: str) -> int:
@@ -188,3 +188,13 @@ def deterministic_random_pick(agent_id: str, salt: str) -> tuple[dict[str, Any],
         "weight": 6.9,
         "link": "",
     }, "Bulbasaur"
+
+
+def get_all_pokemon_names() -> list[str]:
+    """Get all available Pokemon names.
+
+    Returns:
+        List of all Pokemon names.
+    """
+    pokemons = catch_em_all()
+    return [p.get("name") for p in pokemons.values() if p.get("name")]

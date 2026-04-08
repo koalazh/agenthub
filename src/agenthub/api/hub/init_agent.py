@@ -138,8 +138,8 @@ async def init_agent(config: InitAgentConfig) -> Agent:
         logger.info(f"Agent '{agent_id}' initialized successfully at {agent_dir}")
 
         # 10. Return Agent object with Pokemon data
-        # Use agent_name from Skill result, fallback to id or pokemon name
-        agent_name = init_result.agent_name or pokemon_data.name if pokemon_data else agent_id
+        # Use agent_name from Skill result, fallback to user input, then pokemon name
+        agent_name = init_result.agent_name or validated_config.name or (pokemon_data.name if pokemon_data else agent_id)
         return Agent(
             id=agent_id,
             name=agent_name,
