@@ -20,6 +20,23 @@ uv run agenthub doctor
 uv run agenthub serve
 ```
 
+Install the three bundled Profile distributions through Hermes' own installer.
+Run these from the AgentHub repository root:
+
+```bash
+hermes profile install "$PWD/profiles/agenthub-hub" --yes
+hermes profile install "$PWD/profiles/hermes-implementer" --yes
+hermes profile install "$PWD/profiles/hermes-reviewer" --yes
+```
+
+If `agenthub` is not globally installed, start Hermes from a shell where the
+AgentHub virtual environment is active so the Hub Profile can launch its stdio
+MCP server:
+
+```bash
+source .venv/bin/activate
+```
+
 The API listens on `http://127.0.0.1:8787`. Use `/health` for AgentHub liveness
 and `/health/detailed` for database, Hermes API/Gateway, and Kanban diagnostics.
 Hermes being unavailable is reported as a dependency status; it does not make
@@ -35,11 +52,23 @@ uv run agenthub mcp-server
 Set `AGENTHUB_API_BASE_URL` if the Backend is not at
 `http://127.0.0.1:8787`.
 
-Run the Hermes API Server with `agenthub-hub` as its active Profile before
+Enable the Hermes API Server in the `agenthub-hub` Profile's `.env`, then run
+the Gateway with that Profile before
 using `/api/chat` or the Web Hub Chat. AgentHub forwards chat turns to Hermes
 `/v1/runs`; it does not embed another Agent loop. If the Hermes server requires
 authentication, set the same key in `AGENTHUB_HERMES_API_KEY`. The Backend then
 forwards the stable `X-Hermes-Session-Key` for Profile Memory scoping.
+
+```bash
+# In the agenthub-hub Profile .env:
+API_SERVER_ENABLED=true
+API_SERVER_KEY=change-me-local-dev
+
+# In AgentHub .env:
+AGENTHUB_HERMES_API_KEY=change-me-local-dev
+
+hermes -p agenthub-hub gateway
+```
 
 Worker routing defaults to the paid-model-free Fake lane. Set
 `AGENTHUB_DEFAULT_WORKER_LANE` to `hermes`, `claude`, or `codex` to opt into a
@@ -76,3 +105,9 @@ uv run ruff check .
 uv run pytest
 cd web && npm run build
 ```
+
+The core suite uses Fake Workers and deterministic Dispatcher callbacks; it
+does not require or charge a model provider. Live Hermes, Claude, and Codex
+turns are opt-in through configuration.
+
+See [docs/acceptance.md](docs/acceptance.md) for the MVP acceptance-to-test map.

@@ -393,3 +393,24 @@ unreconstructable result. Pending, not-yet-started Runs resume idempotently.
 
 Next: Installation/profile packaging audit, API/schema acceptance matrix,
 fresh-database smoke run, and final MVP verification.
+
+## Final MVP acceptance increment
+
+Commit: `docs: finalize mvp installation and acceptance guide`
+
+Completed: Hermes-official local Profile installation instructions, Hub Gateway
+and API key setup, acceptance-to-test map, CI installation of the pinned Hermes
+checkout, and portable `HERMES_SOURCE_PATH` use so Kanban/Dispatcher tests do
+not silently skip outside the developer machine.
+
+Tests: All three Profile distributions installed through Hermes into a temporary
+Home; 90 Python tests; Ruff; frontend production build; empty SQLite migration
+through revision 0007; and `agenthub doctor` against pinned Hermes 0.14.0.
+
+Known limits: The local Hermes API/Gateway was not running during final checks,
+so `doctor` correctly reported it unavailable. Live provider turns remain
+credential-dependent; all core acceptance evidence is paid-model-free.
+
+Next: MVP implementation is complete. Use the explicit merge Approval flow for
+candidate delivery; production deployment and automatic publishing remain out
+of scope by design.

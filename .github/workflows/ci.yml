@@ -19,6 +19,7 @@ jobs:
           repository: NousResearch/hermes-agent
           ref: 2a8d2174173ab8d05d0b48a44580a8c0b2c8c19b
           path: .hermes-source
+      - run: uv pip install -e .hermes-source
       - run: uv run pytest
         env:
           HERMES_SOURCE_PATH: ${{ github.workspace }}/.hermes-source

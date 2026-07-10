@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,9 @@ from agenthub.hermes.kanban_adapter import (
     task_body,
 )
 
-HERMES_SOURCE = Path("/Users/koala/work/hermes-agent")
+HERMES_SOURCE = Path(
+    os.environ.get("HERMES_SOURCE_PATH", "/Users/koala/work/hermes-agent")
+)
 
 
 def test_project_board_slug_is_stable_and_bounded(tmp_path: Path) -> None:
