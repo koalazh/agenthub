@@ -25,6 +25,16 @@ and `/health/detailed` for database, Hermes API/Gateway, and Kanban diagnostics.
 Hermes being unavailable is reported as a dependency status; it does not make
 the AgentHub health endpoint claim that Hermes is running.
 
+The `agenthub-hub` Hermes Profile connects to the control plane through its
+declared stdio MCP command:
+
+```bash
+uv run agenthub mcp-server
+```
+
+Set `AGENTHUB_API_BASE_URL` if the Backend is not at
+`http://127.0.0.1:8787`.
+
 For the frontend:
 
 ```bash

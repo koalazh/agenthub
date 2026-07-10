@@ -41,6 +41,14 @@ def doctor() -> None:
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+@app.command()
+def mcp_server() -> None:
+    """Run the AgentHub Control MCP Server over stdio."""
+    from agenthub.mcp.server import run as run_mcp
+
+    run_mcp()
+
+
 def run() -> None:
     app()
 

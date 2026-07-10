@@ -175,3 +175,22 @@ Known limits: The declared `agenthub mcp-server` command and Hermes Profile
 Worker Adapter are implemented in the following increments.
 
 Next: AgentHub Control MCP proposal tools, followed by the Hermes Profile Lane.
+
+## AgentHub Control MCP increment
+
+Commit: `feat(mcp): expose agenthub control proposals`
+
+Completed: Pinned official MCP SDK, stdio `agenthub mcp-server`, and Hub tools
+for Goal creation, Harness submission/Patch, Goal query/list, Runtime launch,
+and cancellation. Tools call Backend proposal endpoints and surface validation
+rejections; they never write authoritative state directly.
+
+Tests: MCP tool discovery allowlist, proposal endpoint routing, and Runtime
+validation-error propagation.
+
+Known limits: Approval and merge tools arrive with their persisted domain
+flows. Live Hermes Profile model execution requires user provider credentials
+and remains optional in the core suite.
+
+Next: Hermes Profile Worker Adapter and reconciliation with native Dispatcher
+lifecycle.
