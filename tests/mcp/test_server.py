@@ -51,4 +51,6 @@ async def test_mcp_exposes_only_agenthub_control_tools() -> None:
         "agenthub_list_goals",
         "agenthub_execute_goal",
         "agenthub_cancel_goal",
+        "agenthub_approve",
+        "agenthub_request_merge",
     }

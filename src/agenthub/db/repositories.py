@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from agenthub.db.models import (
+    ApprovalRecord,
     ArtifactRecord,
     EventRecord,
     GoalRecord,
@@ -301,6 +302,11 @@ def get_goal_detail(session: Session, goal_id: str) -> dict[str, object]:
         .where(ArtifactRecord.goal_id == goal_id)
         .order_by(ArtifactRecord.created_at)
     ).all()
+    approvals = session.scalars(
+        select(ApprovalRecord)
+        .where(ApprovalRecord.goal_id == goal_id)
+        .order_by(ApprovalRecord.created_at)
+    ).all()
     return {
         "goal": goal.model_dump(mode="json"),
         "harness_versions": [serialize_harness_version(version) for version in versions],
@@ -344,6 +350,9 @@ def get_goal_detail(session: Session, goal_id: str) -> dict[str, object]:
                 "kanban_board": mapping.kanban_board,
                 "kanban_task_id": mapping.kanban_task_id,
                 "expected_run_id": mapping.expected_run_id,
+                "workspace_path": mapping.workspace_path,
+                "branch_name": mapping.branch_name,
+                "base_commit": mapping.base_commit,
             }
             for mapping in mappings
         ],
@@ -358,8 +367,21 @@ def get_goal_detail(session: Session, goal_id: str) -> dict[str, object]:
                 "media_type": artifact.media_type,
                 "size_bytes": artifact.size_bytes,
                 "created_by_agent": artifact.created_by_agent,
+                "metadata": artifact.metadata_json,
             }
             for artifact in artifacts
+        ],
+        "approvals": [
+            {
+                "id": approval.id,
+                "type": approval.type,
+                "status": approval.status,
+                "request": approval.request_json,
+                "decision": approval.decision_json,
+                "created_at": _utc(approval.created_at),
+                "resolved_at": _utc(approval.resolved_at) if approval.resolved_at else None,
+            }
+            for approval in approvals
         ],
     }
 

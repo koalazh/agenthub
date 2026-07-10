@@ -129,6 +129,9 @@ class TaskMappingRecord(Base):
     kanban_board: Mapped[str] = mapped_column(String(64), nullable=False)
     kanban_task_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     expected_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    workspace_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    branch_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    base_commit: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class AgentDefinitionRecord(Base):
@@ -156,3 +159,16 @@ class AgentStatsRecord(Base):
     average_latency_ms: Mapped[float] = mapped_column(nullable=False, default=0.0)
     recent_failure_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ApprovalRecord(Base):
+    __tablename__ = "approvals"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    goal_id: Mapped[str] = mapped_column(ForeignKey("goals.id"), nullable=False, index=True)
+    type: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    request_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    decision_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

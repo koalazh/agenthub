@@ -239,3 +239,22 @@ must not be presented as stronger isolation than its local permission mode.
 
 Next: Real candidate Commit inspection, Approval/Merge, bounded Review repair,
 SSE/Web/Channel links, then resilience and security hardening.
+
+## Candidate Commit and Merge Approval increment
+
+Commit: `feat(delivery): verify and approve candidate commits`
+
+Completed: Recorded Worktree/base/branch facts, Runtime validation of clean
+candidate Commit ancestry and changed files, provenance metadata replacement of
+Worker claims, durable Merge Approval, idempotent approval decisions, explicit
+merge endpoint/MCP tools, target-HEAD drift protection, and fast-forward-only
+merge after approval. Completion still precedes optional merge.
+
+Tests: Dirty/uncommitted candidate rejection, verified Commit metadata, approval
+required before merge, idempotent approval/merge, successful fast-forward, and
+target branch drift refusal.
+
+Known limits: Fake lane candidate Artifacts are intentionally non-mergeable.
+Review rejection still terminates instead of entering bounded repair.
+
+Next: Bounded Review repair state machine and loop execution.

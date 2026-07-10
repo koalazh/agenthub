@@ -49,6 +49,18 @@ class AgentHubMCPClient:
     def cancel_goal(self, goal_id: str) -> dict[str, object]:
         return self._request("POST", f"/api/goals/{goal_id}/cancel")
 
+    def decide_approval(
+        self, goal_id: str, approval_id: str, decision: str, comment: str | None
+    ) -> dict[str, object]:
+        return self._request(
+            "POST",
+            f"/api/goals/{goal_id}/approvals/{approval_id}",
+            json={"decision": decision, "comment": comment},
+        )
+
+    def merge_goal(self, goal_id: str) -> dict[str, object]:
+        return self._request("POST", f"/api/goals/{goal_id}/merge")
+
 
 def _client() -> AgentHubMCPClient:
     return AgentHubMCPClient(os.environ.get("AGENTHUB_API_BASE_URL", "http://127.0.0.1:8787"))
@@ -151,6 +163,33 @@ def agenthub_cancel_goal(goal_id: str) -> dict[str, object]:
     client = _client()
     try:
         return client.cancel_goal(goal_id)
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def agenthub_approve(
+    goal_id: str,
+    approval_id: str,
+    decision: str,
+    comment: str | None = None,
+) -> dict[str, object]:
+    """Resolve a pending Runtime approval as approve or reject."""
+    if decision not in {"approve", "reject"}:
+        raise ValueError("decision must be approve or reject")
+    client = _client()
+    try:
+        return client.decide_approval(goal_id, approval_id, decision, comment)
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def agenthub_request_merge(goal_id: str) -> dict[str, object]:
+    """Ask Runtime to merge an approved, verified candidate Commit."""
+    client = _client()
+    try:
+        return client.merge_goal(goal_id)
     finally:
         client.close()
 

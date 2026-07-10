@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from agenthub import __version__
 from agenthub.api.agents import router as agents_router
+from agenthub.api.approvals import router as approvals_router
 from agenthub.api.artifacts import router as artifacts_router
 from agenthub.api.goals import router as goals_router
 from agenthub.artifacts.store import ArtifactStore
@@ -60,6 +61,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if "codex" in available_runtimes:
         external_adapters["codex://default"] = CodexWorkerAdapter()
     app.state.external_lane_supervisor = ExternalLaneSupervisor(external_adapters)
+    app.state.workspace_manager = WorkspaceManager(active_settings.data_dir / "worktrees")
     app.state.runtime_controller = None
     app.state.runtime_error = None
     if active_settings.hermes_source_path is not None:
@@ -71,7 +73,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     source_path=active_settings.hermes_source_path,
                 ),
                 artifacts=ArtifactStore(active_settings.data_dir / "artifacts"),
-                workspaces=WorkspaceManager(active_settings.data_dir / "worktrees"),
+                workspaces=app.state.workspace_manager,
                 registry=registry,
                 available_runtimes=frozenset(available_runtimes),
                 default_worker_lane=active_settings.default_worker_lane,
@@ -82,6 +84,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     else:
         app.state.runtime_error = "AGENTHUB_HERMES_SOURCE_PATH is not configured"
     app.include_router(agents_router)
+    app.include_router(approvals_router)
     app.include_router(artifacts_router)
     app.include_router(goals_router)
 

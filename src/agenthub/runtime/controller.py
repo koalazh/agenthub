@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -9,6 +10,7 @@ from agenthub.artifacts.store import ArtifactProvenance, ArtifactStore
 from agenthub.context.projector import project_task_envelope
 from agenthub.db.models import (
     AgentStatsRecord,
+    ApprovalRecord,
     ArtifactRecord,
     GoalRecord,
     HarnessRunRecord,
@@ -30,10 +32,10 @@ from agenthub.harness.schema import (
 from agenthub.hermes.kanban_adapter import HermesKanbanAdapter, task_body
 from agenthub.registry.models import AgentDefinition, AgentRegistryConfig
 from agenthub.registry.resolver import AgentDemand, resolve_agent
-from agenthub.workers.base import WorkerResultStatus, WorkerStartRequest
+from agenthub.workers.base import ProducedArtifact, WorkerResultStatus, WorkerStartRequest
 from agenthub.workers.fake_adapter import FakeWorkerAdapter
 from agenthub.workers.supervisor import ExternalLaneSupervisor
-from agenthub.workspace.manager import WorkspaceManager
+from agenthub.workspace.manager import WorkspaceError, WorkspaceManager
 
 
 class RuntimeExecutionError(RuntimeError):
@@ -224,10 +226,12 @@ class RuntimeController:
                 if any(parent is None for parent in parent_mappings):
                     raise RuntimeExecutionError(f"step {step.id} parent mapping is missing")
                 parent_ids = tuple(parent.kanban_task_id for parent in parent_mappings if parent)
-                workspace_kind, workspace_path, branch_name = self._workspace_for_step(
+                workspace_kind, workspace_path, branch_name, base_commit = (
+                    self._workspace_for_step(
                     step=step,
                     goal=goal,
                     parent_mappings=[parent for parent in parent_mappings if parent],
+                    )
                 )
                 outputs = self._outputs(step)
                 binding = self._binding_for_step(session, run, step)
@@ -275,6 +279,9 @@ class RuntimeController:
                         kanban_board=board,
                         kanban_task_id=task_id,
                         expected_run_id=None,
+                        workspace_path=workspace_path,
+                        branch_name=branch_name,
+                        base_commit=base_commit,
                     )
                 )
                 _append_event(
@@ -301,20 +308,23 @@ class RuntimeController:
         step: object,
         goal: GoalRecord,
         parent_mappings: list[TaskMappingRecord],
-    ) -> tuple[str, str | None, str | None]:
+    ) -> tuple[str, str | None, str | None, str | None]:
         project_root = Path(goal.project_root)
         if isinstance(step, AgentCallStep) and step.workspace.mode == "write_candidate":
             workspace = self._workspaces.provision(
-                project_root=project_root, goal_id=goal.id, task_id=step.id
+                project_root=project_root,
+                default_branch=goal.default_branch,
+                goal_id=goal.id,
+                task_id=step.id,
             )
-            return "worktree", str(workspace.path), workspace.branch
+            return "worktree", str(workspace.path), workspace.branch, workspace.base_commit
         for parent in reversed(parent_mappings):
             snapshot = self._kanban.get_task(
                 board=parent.kanban_board, task_id=parent.kanban_task_id
             )
             if snapshot and snapshot.workspace_path:
-                return "dir", snapshot.workspace_path, None
-        return "dir", str(project_root), None
+                return "dir", snapshot.workspace_path, None, None
+        return "dir", str(project_root), None, None
 
     async def run_fake_until_terminal(
         self, goal_id: str, *, max_ticks: int = 50
@@ -433,7 +443,6 @@ class RuntimeController:
             raise RuntimeExecutionError(
                 "Hermes Profile Lane is driven asynchronously by the native Dispatcher"
             )
-        self._record_agent_stats(session, execution, step, result)
         for event in events:
             _append_event(
                 session,
@@ -444,6 +453,7 @@ class RuntimeController:
                 correlation_id=run.id,
             )
         if result.status is not WorkerResultStatus.COMPLETED:
+            self._record_agent_stats(session, execution, step, result)
             self._kanban.block(
                 board=mapping.kanban_board,
                 task_id=mapping.kanban_task_id,
@@ -453,8 +463,63 @@ class RuntimeController:
             self._fail_run(session, run, goal, execution, result.summary)
             return
 
+        candidate_metadata: dict[str, object] | None = None
+        produced_artifacts = result.artifacts
+        if (
+            isinstance(step, AgentCallStep)
+            and step.workspace.mode == "write_candidate"
+            and not (execution.agent_id or "").startswith("fake://")
+        ):
+            if not (mapping.workspace_path and mapping.branch_name and mapping.base_commit):
+                self._fail_run(session, run, goal, execution, "candidate workspace facts missing")
+                return
+            try:
+                candidate = self._workspaces.inspect_candidate(
+                    workspace_path=Path(mapping.workspace_path),
+                    branch=mapping.branch_name,
+                    base_commit=mapping.base_commit,
+                )
+            except WorkspaceError as exc:
+                self._kanban.block(
+                    board=mapping.kanban_board,
+                    task_id=mapping.kanban_task_id,
+                    expected_run_id=claimed.current_run_id,
+                    reason=f"candidate-invalid: {exc}",
+                )
+                self._fail_run(session, run, goal, execution, str(exc))
+                return
+            candidate_metadata = {
+                "workspace_path": str(candidate.workspace_path),
+                "branch": candidate.branch,
+                "base_commit": candidate.base_commit,
+                "commit_sha": candidate.commit_sha,
+                "changed_files": list(candidate.changed_files),
+            }
+            candidate_content = json.dumps(candidate_metadata, indent=2).encode()
+            produced_artifacts = tuple(
+                ProducedArtifact(
+                    kind=artifact.kind,
+                    filename=artifact.filename,
+                    media_type=(
+                        "application/json"
+                        if artifact.kind == "candidate_commit"
+                        else artifact.media_type
+                    ),
+                    content=(
+                        candidate_content
+                        if artifact.kind == "candidate_commit"
+                        else artifact.content
+                    ),
+                )
+                for artifact in result.artifacts
+            )
+        self._record_agent_stats(session, execution, step, result)
+
         artifact_uris: list[str] = []
-        for produced in result.artifacts:
+        for produced in produced_artifacts:
+            artifact_metadata: dict[str, object] = {"filename": produced.filename}
+            if produced.kind == "candidate_commit":
+                artifact_metadata.update(candidate_metadata or {"fake": True})
             record = self._artifacts.publish(
                 session,
                 provenance=ArtifactProvenance(
@@ -466,7 +531,7 @@ class RuntimeController:
                 kind=produced.kind,
                 media_type=produced.media_type,
                 content=produced.content,
-                metadata={"filename": produced.filename},
+                metadata=artifact_metadata,
             )
             artifact_uris.append(record.uri)
             _append_event(
@@ -683,6 +748,33 @@ class RuntimeController:
             payload={"harness_run_id": run.id},
             correlation_id=run.id,
         )
+        if step.delivery == "candidate_commit":
+            approval = session.scalar(
+                select(ApprovalRecord).where(
+                    ApprovalRecord.goal_id == goal.id,
+                    ApprovalRecord.type == "merge",
+                )
+            )
+            if approval is None:
+                approval = ApprovalRecord(
+                    id=f"approval_{uuid4().hex}",
+                    goal_id=goal.id,
+                    type="merge",
+                    status="pending",
+                    request_json={"delivery": "candidate_commit"},
+                    decision_json={},
+                    created_at=now,
+                    resolved_at=None,
+                )
+                session.add(approval)
+                _append_event(
+                    session,
+                    goal_id=goal.id,
+                    event_type="approval.requested",
+                    actor="agenthub://completion-controller",
+                    payload={"approval_id": approval.id, "type": "merge"},
+                    correlation_id=run.id,
+                )
         session.commit()
 
     def _fail_run(

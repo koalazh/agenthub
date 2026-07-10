@@ -255,11 +255,24 @@ def test_codex_implementation_and_claude_review_execute_through_supervisor(
     initialize_project(project)
     settings = runtime_settings(tmp_path).model_copy(update={"default_worker_lane": "codex"})
     app = create_app(settings)
-    def command(_request: object, _output: Path) -> list[str]:
+    def command(worker_request: object, _output: Path) -> list[str]:
+        if worker_request.task_id == "implement":
+            script = (
+                "import json,subprocess; from pathlib import Path; "
+                "Path('implemented.txt').write_text('candidate\\n'); "
+                "subprocess.run(['git','add','implemented.txt'],check=True); "
+                "subprocess.run(['git','commit','-m','feat: candidate'],check=True); "
+                "print(json.dumps({'type':'turn.completed','usage':{'input_tokens':1}}))"
+            )
+        else:
+            script = (
+                "import json; "
+                "print(json.dumps({'type':'turn.completed','usage':{'input_tokens':1}}))"
+            )
         return [
             sys.executable,
             "-c",
-            "import json; print(json.dumps({'type':'turn.completed','usage':{'input_tokens':1}}))",
+            script,
         ]
     supervisor = ExternalLaneSupervisor(
         {
@@ -275,10 +288,43 @@ def test_codex_implementation_and_claude_review_execute_through_supervisor(
         client.post(f"/api/goals/{goal_id}/harness", json=harness)
 
         response = client.post(f"/api/goals/{goal_id}/execute")
+        detail = response.json()
         agents = client.get("/api/agents").json()
+        approval = detail["approvals"][0]
+        before_approval = client.post(f"/api/goals/{goal_id}/merge")
+        approval_response = client.post(
+            f"/api/goals/{goal_id}/approvals/{approval['id']}",
+            json={"decision": "approve", "comment": "Ship it"},
+        )
+        repeated_approval = client.post(
+            f"/api/goals/{goal_id}/approvals/{approval['id']}",
+            json={"decision": "approve", "comment": "Repeated"},
+        )
+        merge_response = client.post(f"/api/goals/{goal_id}/merge")
+        repeated_merge = client.post(f"/api/goals/{goal_id}/merge")
 
     assert response.status_code == 200, response.text
-    assert response.json()["goal"]["status"] == "completed"
+    assert detail["goal"]["status"] == "completed"
+    candidate = next(
+        artifact for artifact in detail["artifacts"] if artifact["kind"] == "candidate_commit"
+    )
+    assert candidate["metadata"]["commit_sha"]
+    assert candidate["metadata"]["changed_files"] == ["implemented.txt"]
+    assert before_approval.status_code == 409
+    assert approval_response.json()["status"] == "approved"
+    assert repeated_approval.json()["status"] == "approved"
+    assert merge_response.status_code == 200
+    assert repeated_merge.json() == merge_response.json()
+    assert (
+        subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=project,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        == candidate["metadata"]["commit_sha"]
+    )
     assert next(agent for agent in agents if agent["id"] == "codex://default")["stats"][
         "completed_runs"
     ] == 2
