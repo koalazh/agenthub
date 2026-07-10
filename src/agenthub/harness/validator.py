@@ -54,6 +54,7 @@ def validate_harness(
     _validate_bounds(harness, active_policy, errors)
     _validate_graph(harness, errors)
     _validate_required_steps(harness, errors)
+    _validate_workspace_permissions(harness, errors)
     _validate_independence(harness, errors)
     _validate_loop_references(harness, errors)
     _validate_physical_ids(harness, errors)
@@ -143,6 +144,16 @@ def _validate_required_steps(harness: ProgressiveHarness, errors: list[str]) -> 
         errors.append("harness requires an independent review step")
     if len(finalizers) != 1:
         errors.append("harness requires exactly one finalize step")
+
+
+def _validate_workspace_permissions(
+    harness: ProgressiveHarness, errors: list[str]
+) -> None:
+    for step in (step for step in harness.steps if isinstance(step, AgentCallStep)):
+        if "candidate_commit" in step.outputs and step.workspace.mode != "write_candidate":
+            errors.append(
+                f"step {step.id} outputs candidate_commit but does not use write_candidate"
+            )
 
 
 def _validate_independence(harness: ProgressiveHarness, errors: list[str]) -> None:

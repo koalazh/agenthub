@@ -133,6 +133,15 @@ def test_review_must_exclude_executor() -> None:
         validate_harness(harness, goal_id="goal_test")
 
 
+def test_candidate_commit_output_requires_write_candidate_workspace() -> None:
+    payload = valid_harness()
+    payload["steps"][1]["workspace"]["mode"] = "read_only"
+    harness = parse_harness(payload)
+
+    with pytest.raises(HarnessValidationError, match="does not use write_candidate"):
+        validate_harness(harness, goal_id="goal_test")
+
+
 def test_static_agent_run_bound_is_enforced() -> None:
     payload = valid_harness()
     payload["bounds"]["max_agent_runs"] = 2

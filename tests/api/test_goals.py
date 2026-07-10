@@ -240,6 +240,18 @@ def test_harness_goal_id_must_match_endpoint(tmp_path: Path) -> None:
     assert "goal_id" in str(response.json()["detail"])
 
 
+def test_harness_cannot_change_goal_delivery_contract(tmp_path: Path) -> None:
+    with TestClient(create_app(settings_for(tmp_path))) as client:
+        goal_id = create_goal(client, tmp_path)
+        harness = harness_for(goal_id)
+        harness["steps"][-1]["delivery"] = "patch"
+
+        response = client.post(f"/api/goals/{goal_id}/harness", json=harness)
+
+    assert response.status_code == 422
+    assert "immutable Goal Contract" in str(response.json()["detail"])
+
+
 def test_harness_patch_count_is_bounded(tmp_path: Path) -> None:
     with TestClient(create_app(settings_for(tmp_path))) as client:
         goal_id = create_goal(client, tmp_path)

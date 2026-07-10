@@ -24,7 +24,7 @@ from agenthub.domain.goal import DeliveryMode, DeliveryPolicy, Goal, GoalContrac
 from agenthub.harness.compiler import compile_harness
 from agenthub.harness.patcher import PatchHarnessProposal, apply_patch
 from agenthub.harness.schema import ProgressiveHarness
-from agenthub.harness.validator import validate_harness
+from agenthub.harness.validator import HarnessValidationError, validate_harness
 
 
 class GoalNotFoundError(LookupError):
@@ -206,6 +206,7 @@ def submit_initial_harness(
     if goal_record.harness_versions:
         raise HarnessVersionConflictError("initial harness already exists; submit a patch")
     validate_harness(harness, goal_id=goal_id)
+    _validate_contract_alignment(goal_record, harness)
     return _commit_harness_version(
         session,
         goal_record=goal_record,
@@ -246,6 +247,7 @@ def patch_harness(
         raise HarnessVersionConflictError("harness patch version limit has been reached")
     patched = apply_patch(current_harness, proposal)
     validate_harness(patched, goal_id=goal_id)
+    _validate_contract_alignment(goal_record, patched)
     return _commit_harness_version(
         session,
         goal_record=goal_record,
@@ -254,6 +256,20 @@ def patch_harness(
         patch_reason=proposal.reason,
         generated_by=proposal.generated_by,
     )
+
+
+def _validate_contract_alignment(
+    goal_record: GoalRecord, harness: ProgressiveHarness
+) -> None:
+    contract = GoalContract.model_validate(goal_record.contract_json)
+    finalizer = next(step for step in harness.steps if step.kind == "finalize")
+    if finalizer.delivery != contract.delivery.mode:
+        raise HarnessValidationError(
+            [
+                "finalize delivery does not match immutable Goal Contract "
+                f"delivery {contract.delivery.mode}"
+            ]
+        )
 
 
 def _commit_harness_version(
