@@ -41,3 +41,19 @@ response reports it unavailable. No Kanban board is initialized yet.
 
 Next: Goal domain, typed Harness IR, validation, immutable versions/patches,
 event store, and REST API.
+
+## Goal domain increment
+
+Commit: `feat(domain): add goal contract and lifecycle`
+
+Completed: Immutable GoalContract and delivery policy, typed Goal states, legal
+transition enforcement, terminal-state protection, and Completion Controller
+authority for the completed state.
+
+Tests: Domain validation, contract immutability, legal/illegal transitions,
+automatic-merge rejection, and completion authority.
+
+Known limits: Persistence and HTTP creation are part of the following
+Milestone 1 increments.
+
+Next: Typed Harness IR and static validation.
