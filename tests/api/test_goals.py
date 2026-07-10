@@ -106,6 +106,36 @@ def test_create_goal_submit_harness_and_restore_after_restart(tmp_path: Path) ->
     assert len(detail["harness_versions"]) == 1
 
 
+def test_create_goal_persists_origin_session_link(tmp_path: Path) -> None:
+    with TestClient(create_app(settings_for(tmp_path))) as client:
+        response = client.post(
+            "/api/goals",
+            json={
+                "objective": "Fix refresh race",
+                "project_root": str(tmp_path),
+                "acceptance_criteria": ["Regression test passes"],
+                "origin": {
+                    "channel": "telegram",
+                    "session_key": "agent:main:telegram:dm:123",
+                    "external_user_id": "123",
+                },
+            },
+        )
+        assert response.status_code == 201, response.text
+        detail = client.get(f"/api/goals/{response.json()['goal_id']}").json()
+
+    assert detail["session_links"] == [
+        {
+            "id": detail["session_links"][0]["id"],
+            "hermes_profile": "agenthub-hub",
+            "session_key": "agent:main:telegram:dm:123",
+            "channel": "telegram",
+            "external_user_id": "123",
+            "relation": "origin",
+        }
+    ]
+
+
 def test_patch_creates_immutable_auditable_version(tmp_path: Path) -> None:
     with TestClient(create_app(settings_for(tmp_path))) as client:
         goal_id = create_goal(client, tmp_path)

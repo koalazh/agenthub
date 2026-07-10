@@ -7,16 +7,19 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from agenthub.artifacts.store import ArtifactProvenance, ArtifactStore
+from agenthub.context.handoff import Handoff
 from agenthub.context.projector import project_task_envelope
 from agenthub.db.models import (
     AgentStatsRecord,
     ApprovalRecord,
     ArtifactRecord,
     GoalRecord,
+    HandoffRecord,
     HarnessRunRecord,
     HarnessVersionRecord,
     StepExecutionRecord,
     TaskMappingRecord,
+    UsageRecord,
 )
 from agenthub.db.repositories import _append_event, get_goal_detail, goal_to_domain
 from agenthub.domain.goal import GoalStatus
@@ -446,7 +449,7 @@ class RuntimeController:
             kanban_task_id=mapping.kanban_task_id,
             expected_run_id=claimed.current_run_id,
             agent_id=execution.agent_id or "fake://default",
-            task_envelope=self._task_envelope(goal, run, step, workspace_path),
+            task_envelope=self._task_envelope(session, goal, run, step, workspace_path),
             workspace_path=workspace_path,
             timeout_seconds=900,
             artifact_output_dir=self._artifacts.root / goal.id / step.id,
@@ -465,6 +468,7 @@ class RuntimeController:
             raise RuntimeExecutionError(
                 "Hermes Profile Lane is driven asynchronously by the native Dispatcher"
             )
+        self._record_usage(session, run, execution, mapping, result)
         for event in events:
             _append_event(
                 session,
@@ -595,6 +599,13 @@ class RuntimeController:
         if review_decision is not None:
             result_json["review_decision"] = review_decision
         execution.result_json = result_json
+        self._publish_handoffs(
+            session,
+            run=run,
+            from_task_id=step.id,
+            summary=result.summary,
+            artifact_refs=tuple(artifact_uris),
+        )
         event_type = "review.completed" if isinstance(step, ReviewStep) else "step.completed"
         payload: dict[str, object] = {"step_id": step.id}
         if isinstance(step, ReviewStep):
@@ -642,6 +653,83 @@ class RuntimeController:
         else:
             stats.recent_failure_count += 1
         stats.last_used_at = now
+
+    @staticmethod
+    def _record_usage(
+        session: Session,
+        run: HarnessRunRecord,
+        execution: StepExecutionRecord,
+        mapping: TaskMappingRecord,
+        result: object,
+    ) -> None:
+        usage = getattr(result, "usage", {})
+        if not isinstance(usage, dict):
+            usage = {}
+
+        def integer(name: str) -> int:
+            value = usage.get(name, 0)
+            return int(value) if isinstance(value, int | float) else 0
+
+        cost = usage.get("cost_usd", 0.0)
+        session.add(
+            UsageRecord(
+                id=f"usage_{uuid4().hex}",
+                goal_id=run.goal_id,
+                task_id=execution.step_id,
+                run_id=f"{mapping.kanban_board}:{mapping.expected_run_id}",
+                agent_id=execution.agent_id or "unknown",
+                model=str(usage["model"]) if usage.get("model") else None,
+                input_tokens=integer("input_tokens"),
+                output_tokens=integer("output_tokens"),
+                cost_usd=float(cost) if isinstance(cost, int | float) else 0.0,
+                raw_json=usage,
+                created_at=datetime.now(UTC),
+            )
+        )
+
+    def _publish_handoffs(
+        self,
+        session: Session,
+        *,
+        run: HarnessRunRecord,
+        from_task_id: str,
+        summary: str,
+        artifact_refs: tuple[str, ...],
+    ) -> None:
+        version = session.get(HarnessVersionRecord, run.harness_version_id)
+        if version is None:
+            raise RuntimeExecutionError("run Harness Version is missing")
+        harness = ProgressiveHarness.model_validate(version.logical_ir_json)
+        children = [
+            physical.id
+            for physical in compile_harness(harness).steps
+            if from_task_id in physical.depends_on
+        ]
+        for child_id in children:
+            existing = session.scalar(
+                select(HandoffRecord).where(
+                    HandoffRecord.goal_id == run.goal_id,
+                    HandoffRecord.from_task_id == from_task_id,
+                    HandoffRecord.to_task_id == child_id,
+                )
+            )
+            if existing is not None:
+                continue
+            handoff = Handoff(
+                summary=summary,
+                artifact_refs=artifact_refs,
+                confidence=1.0,
+            )
+            session.add(
+                HandoffRecord(
+                    id=f"handoff_{uuid4().hex}",
+                    goal_id=run.goal_id,
+                    from_task_id=from_task_id,
+                    to_task_id=child_id,
+                    payload_json=handoff.model_dump(mode="json"),
+                    created_at=datetime.now(UTC),
+                )
+            )
 
     def _execute_gate(
         self,
@@ -1323,15 +1411,45 @@ class RuntimeController:
 
     def _task_envelope(
         self,
+        session: Session,
         goal: GoalRecord,
         run: HarnessRunRecord,
         step: AgentCallStep | ReviewStep,
         workspace_path: Path,
     ) -> dict[str, object]:
+        handoffs = session.scalars(
+            select(HandoffRecord).where(
+                HandoffRecord.goal_id == goal.id,
+                HandoffRecord.to_task_id == step.id,
+            )
+        ).all()
+        handoff_refs = tuple(f"handoff://{handoff.id}" for handoff in handoffs)
+        artifact_refs = tuple(
+            dict.fromkeys(
+                str(ref)
+                for handoff in handoffs
+                for ref in handoff.payload_json.get("artifact_refs", [])
+            )
+        )
+        if isinstance(step, ReviewStep):
+            requested_kinds = set(step.inputs)
+            if "checks" in requested_kinds:
+                requested_kinds.add("test-log")
+            related = session.scalars(
+                select(ArtifactRecord).where(
+                    ArtifactRecord.goal_id == goal.id,
+                    ArtifactRecord.kind.in_(requested_kinds),
+                )
+            ).all()
+            artifact_refs = tuple(
+                dict.fromkeys((*artifact_refs, *(artifact.uri for artifact in related)))
+            )
         envelope = project_task_envelope(
             goal=goal_to_domain(goal),
             run_id=run.id,
             step=step,
             workspace_path=workspace_path,
+            handoff_refs=handoff_refs,
+            artifact_refs=artifact_refs,
         )
         return envelope.model_dump(mode="json", by_alias=True)

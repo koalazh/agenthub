@@ -12,10 +12,13 @@ from agenthub.db.models import (
     ArtifactRecord,
     EventRecord,
     GoalRecord,
+    GoalSessionLinkRecord,
+    HandoffRecord,
     HarnessRunRecord,
     HarnessVersionRecord,
     StepExecutionRecord,
     TaskMappingRecord,
+    UsageRecord,
 )
 from agenthub.domain.goal import DeliveryMode, DeliveryPolicy, Goal, GoalContract, GoalStatus
 from agenthub.harness.compiler import compile_harness
@@ -66,6 +69,47 @@ def _append_event(
     )
     session.add(event)
     return event
+
+
+def link_goal_session(
+    session: Session,
+    *,
+    goal_id: str,
+    session_key: str,
+    channel: str,
+    external_user_id: str | None,
+    relation: str = "origin",
+) -> GoalSessionLinkRecord:
+    existing = session.scalar(
+        select(GoalSessionLinkRecord).where(
+            GoalSessionLinkRecord.goal_id == goal_id,
+            GoalSessionLinkRecord.session_key == session_key,
+            GoalSessionLinkRecord.relation == relation,
+        )
+    )
+    if existing is not None:
+        return existing
+    link = GoalSessionLinkRecord(
+        id=_id("gsl"),
+        goal_id=goal_id,
+        hermes_profile="agenthub-hub",
+        session_key=session_key,
+        channel=channel,
+        external_user_id=external_user_id,
+        relation=relation,
+        created_at=datetime.now(UTC),
+    )
+    session.add(link)
+    _append_event(
+        session,
+        goal_id=goal_id,
+        event_type="goal.session_linked",
+        actor="agenthub://runtime",
+        payload={"session_key": session_key, "channel": channel, "relation": relation},
+        correlation_id=link.id,
+    )
+    session.commit()
+    return link
 
 
 def create_goal(
@@ -307,6 +351,21 @@ def get_goal_detail(session: Session, goal_id: str) -> dict[str, object]:
         .where(ApprovalRecord.goal_id == goal_id)
         .order_by(ApprovalRecord.created_at)
     ).all()
+    handoffs = session.scalars(
+        select(HandoffRecord)
+        .where(HandoffRecord.goal_id == goal_id)
+        .order_by(HandoffRecord.created_at)
+    ).all()
+    usage = session.scalars(
+        select(UsageRecord)
+        .where(UsageRecord.goal_id == goal_id)
+        .order_by(UsageRecord.created_at)
+    ).all()
+    session_links = session.scalars(
+        select(GoalSessionLinkRecord)
+        .where(GoalSessionLinkRecord.goal_id == goal_id)
+        .order_by(GoalSessionLinkRecord.created_at)
+    ).all()
     return {
         "goal": goal.model_dump(mode="json"),
         "harness_versions": [serialize_harness_version(version) for version in versions],
@@ -382,6 +441,46 @@ def get_goal_detail(session: Session, goal_id: str) -> dict[str, object]:
                 "resolved_at": _utc(approval.resolved_at) if approval.resolved_at else None,
             }
             for approval in approvals
+        ],
+        "handoffs": [
+            {
+                "id": handoff.id,
+                "from_task_id": handoff.from_task_id,
+                "to_task_id": handoff.to_task_id,
+                **handoff.payload_json,
+            }
+            for handoff in handoffs
+        ],
+        "usage_records": [
+            {
+                "id": item.id,
+                "task_id": item.task_id,
+                "run_id": item.run_id,
+                "agent_id": item.agent_id,
+                "model": item.model,
+                "input_tokens": item.input_tokens,
+                "output_tokens": item.output_tokens,
+                "cost_usd": item.cost_usd,
+                "raw": item.raw_json,
+            }
+            for item in usage
+        ],
+        "usage_summary": {
+            "input_tokens": sum(item.input_tokens for item in usage),
+            "output_tokens": sum(item.output_tokens for item in usage),
+            "cost_usd": sum(item.cost_usd for item in usage),
+            "worker_runs": len(usage),
+        },
+        "session_links": [
+            {
+                "id": link.id,
+                "hermes_profile": link.hermes_profile,
+                "session_key": link.session_key,
+                "channel": link.channel,
+                "external_user_id": link.external_user_id,
+                "relation": link.relation,
+            }
+            for link in session_links
         ],
     }
 

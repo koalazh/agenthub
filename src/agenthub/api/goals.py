@@ -14,6 +14,7 @@ from agenthub.db.repositories import (
     HarnessVersionConflictError,
     create_goal,
     get_goal_detail,
+    link_goal_session,
     list_events,
     list_goals,
     patch_harness,
@@ -57,6 +58,15 @@ class CreateGoalRequest(BaseModel):
     delivery_mode: DeliveryMode = DeliveryMode.CANDIDATE_COMMIT
     owner_user_id: str = "local-user"
     default_branch: str = "main"
+    origin: "GoalOrigin | None" = None
+
+
+class GoalOrigin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    channel: str = Field(min_length=1, max_length=64)
+    session_key: str = Field(min_length=1, max_length=300)
+    external_user_id: str | None = Field(default=None, max_length=200)
 
 
 def _not_found(exc: GoalNotFoundError) -> HTTPException:
@@ -80,6 +90,14 @@ def create_goal_endpoint(
         owner_user_id=request.owner_user_id,
         default_branch=request.default_branch,
     )
+    if request.origin is not None:
+        link_goal_session(
+            session,
+            goal_id=goal.id,
+            session_key=request.origin.session_key,
+            channel=request.origin.channel,
+            external_user_id=request.origin.external_user_id,
+        )
     return {"goal_id": goal.id, "status": goal.status, "contract": goal.contract}
 
 

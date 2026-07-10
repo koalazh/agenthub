@@ -313,3 +313,22 @@ semantics. Distributed scheduling remains out of scope.
 
 Next: Persist Usage and Handoff records, expose Goal summaries, establish a
 Gateway Channel-to-Goal link, then complete hardening and acceptance evidence.
+
+## Coordination and observability records increment
+
+Commit: `feat(observability): persist usage handoffs and session links`
+
+Completed: Migration-backed UsageRecord, bounded Handoff, and GoalSessionLink;
+per-Worker token/cost capture; direct-child Handoff projection; authorized
+Review Artifact projection; Goal usage summaries; origin Channel/Session
+binding; and Web usage display. Runtime facts stay out of Hermes Profile Memory.
+
+Tests: Empty-database migration through revision 0007, origin link persistence,
+per-worker usage aggregation, Handoff topology and Artifact references, full
+Python suite, Ruff, and frontend production build.
+
+Known limits: Fake usage is correctly recorded as zero. Provider cost is shown
+only when the Worker runtime reports `cost_usd`; AgentHub does not invent prices.
+
+Next: Thin Hermes Runs API chat proxy and Channel attachment API, then limits,
+reconciliation hardening, documentation, and final acceptance verification.

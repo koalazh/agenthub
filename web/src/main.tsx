@@ -16,6 +16,7 @@ type GoalDetail = {
   step_executions: Array<{ step_id: string; kind: string; status: string; agent_id: string | null }>;
   artifacts: Array<{ id: string; kind: string; size_bytes: number }>;
   approvals: Array<{ id: string; type: string; status: string }>;
+  usage_summary: { input_tokens: number; output_tokens: number; cost_usd: number; worker_runs: number };
 };
 
 function App() {
@@ -129,6 +130,10 @@ function App() {
               <section><h3>Artifacts</h3>{selected.artifacts.map((item) => <p key={item.id}>{item.kind} · {item.size_bytes} B</p>)}</section>
               <section><h3>Approvals</h3>{selected.approvals.map((item) => <p key={item.id}>{item.type} · {item.status}</p>)}</section>
             </div>
+            <section>
+              <h3>Usage</h3>
+              <p>{selected.usage_summary.worker_runs} Worker runs · {selected.usage_summary.input_tokens + selected.usage_summary.output_tokens} tokens · ${selected.usage_summary.cost_usd.toFixed(4)}</p>
+            </section>
           </>
         )}
       </main>

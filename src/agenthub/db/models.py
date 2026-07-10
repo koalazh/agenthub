@@ -172,3 +172,45 @@ class ApprovalRecord(Base):
     decision_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class HandoffRecord(Base):
+    __tablename__ = "handoffs"
+    __table_args__ = (UniqueConstraint("goal_id", "from_task_id", "to_task_id"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    goal_id: Mapped[str] = mapped_column(ForeignKey("goals.id"), nullable=False, index=True)
+    from_task_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    to_task_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class UsageRecord(Base):
+    __tablename__ = "usage_records"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    goal_id: Mapped[str] = mapped_column(ForeignKey("goals.id"), nullable=False, index=True)
+    task_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    agent_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    model: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    cost_usd: Mapped[float] = mapped_column(nullable=False)
+    raw_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class GoalSessionLinkRecord(Base):
+    __tablename__ = "goal_session_links"
+    __table_args__ = (UniqueConstraint("goal_id", "session_key", "relation"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    goal_id: Mapped[str] = mapped_column(ForeignKey("goals.id"), nullable=False, index=True)
+    hermes_profile: Mapped[str] = mapped_column(String(100), nullable=False)
+    session_key: Mapped[str] = mapped_column(String(300), nullable=False, index=True)
+    channel: Mapped[str] = mapped_column(String(64), nullable=False)
+    external_user_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    relation: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

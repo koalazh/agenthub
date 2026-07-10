@@ -154,6 +154,21 @@ def test_fake_goal_runs_through_hermes_gate_review_and_completion(tmp_path: Path
             "test-log",
             "review_report",
         }
+        assert detail["usage_summary"] == {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_usd": 0.0,
+            "worker_runs": 3,
+        }
+        assert {(item["from_task_id"], item["to_task_id"]) for item in detail["handoffs"]} == {
+            ("inspect", "implement"),
+            ("implement", "checks"),
+            ("review", "finalize"),
+        }
+        implementation_handoff = next(
+            item for item in detail["handoffs"] if item["from_task_id"] == "implement"
+        )
+        assert implementation_handoff["artifact_refs"]
         executor = next(
             step["agent_id"]
             for step in detail["step_executions"]
