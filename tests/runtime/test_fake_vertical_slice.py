@@ -9,7 +9,10 @@ from fastapi.testclient import TestClient
 from agenthub.api.app import create_app
 from agenthub.hermes.kanban_adapter import HermesKanbanAdapter
 from agenthub.settings import Settings
+from agenthub.workers.claude_adapter import ClaudeWorkerAdapter
+from agenthub.workers.codex_adapter import CodexWorkerAdapter
 from agenthub.workers.fake_adapter import FakeWorkerAdapter
+from agenthub.workers.supervisor import ExternalLaneSupervisor
 from tests.api.test_goals import create_goal
 from tests.harness.test_validator import valid_harness
 
@@ -206,3 +209,81 @@ def test_cancel_archives_materialized_kanban_tasks(tmp_path: Path) -> None:
         source_path=HERMES_SOURCE,
     )
     assert not kanban.list_tasks(board=board)
+
+
+@pytest.mark.parametrize(
+    ("lane", "implementation_agent"),
+    [
+        ("hermes", "hermes://implementer"),
+        ("claude", "claude://default"),
+        ("codex", "codex://default"),
+    ],
+)
+def test_same_harness_materializes_to_configured_worker_lane(
+    tmp_path: Path, lane: str, implementation_agent: str
+) -> None:
+    project = tmp_path / "project"
+    initialize_project(project)
+    settings = runtime_settings(tmp_path)
+    settings = settings.model_copy(update={"default_worker_lane": lane})
+    app = create_app(settings)
+    with TestClient(app) as client:
+        goal_id = create_goal(client, project)
+        client.post(f"/api/goals/{goal_id}/harness", json=executable_harness(goal_id))
+
+        app.state.runtime_controller.start_goal(goal_id)
+        detail = client.get(f"/api/goals/{goal_id}").json()
+
+    assert next(
+        step["agent_id"]
+        for step in detail["step_executions"]
+        if step["step_id"] == "implement"
+    ) == implementation_agent
+    reviewer = next(
+        step["agent_id"]
+        for step in detail["step_executions"]
+        if step["step_id"] == "review"
+    )
+    assert reviewer != implementation_agent
+    assert len(detail["task_mappings"]) == 5
+
+
+def test_codex_implementation_and_claude_review_execute_through_supervisor(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    initialize_project(project)
+    settings = runtime_settings(tmp_path).model_copy(update={"default_worker_lane": "codex"})
+    app = create_app(settings)
+    def command(_request: object, _output: Path) -> list[str]:
+        return [
+            sys.executable,
+            "-c",
+            "import json; print(json.dumps({'type':'turn.completed','usage':{'input_tokens':1}}))",
+        ]
+    supervisor = ExternalLaneSupervisor(
+        {
+            "codex://default": CodexWorkerAdapter(command_builder=command),
+            "claude://default": ClaudeWorkerAdapter(command_builder=command),
+        }
+    )
+    app.state.runtime_controller._external_supervisor = supervisor
+    with TestClient(app) as client:
+        goal_id = create_goal(client, project)
+        harness = executable_harness(goal_id)
+        harness["steps"][3]["selector"]["agent_id"] = "claude://default"
+        client.post(f"/api/goals/{goal_id}/harness", json=harness)
+
+        response = client.post(f"/api/goals/{goal_id}/execute")
+        agents = client.get("/api/agents").json()
+
+    assert response.status_code == 200, response.text
+    assert response.json()["goal"]["status"] == "completed"
+    assert next(agent for agent in agents if agent["id"] == "codex://default")["stats"][
+        "completed_runs"
+    ] == 2
+    claude_stats = next(agent for agent in agents if agent["id"] == "claude://default")[
+        "stats"
+    ]
+    assert claude_stats["verifier_total_count"] == 1
+    assert claude_stats["verifier_pass_count"] == 1

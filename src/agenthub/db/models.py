@@ -129,3 +129,30 @@ class TaskMappingRecord(Base):
     kanban_board: Mapped[str] = mapped_column(String(64), nullable=False)
     kanban_task_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     expected_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class AgentDefinitionRecord(Base):
+    __tablename__ = "agent_definitions"
+
+    id: Mapped[str] = mapped_column(String(200), primary_key=True)
+    runtime: Mapped[str] = mapped_column(String(32), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    enabled: Mapped[bool] = mapped_column(nullable=False)
+    capabilities_json: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    constraints_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    config_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+
+
+class AgentStatsRecord(Base):
+    __tablename__ = "agent_stats"
+
+    agent_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_definitions.id"), primary_key=True
+    )
+    completed_runs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    verifier_pass_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    verifier_total_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    average_cost: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    average_latency_ms: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    recent_failure_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

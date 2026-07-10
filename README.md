@@ -35,6 +35,12 @@ uv run agenthub mcp-server
 Set `AGENTHUB_API_BASE_URL` if the Backend is not at
 `http://127.0.0.1:8787`.
 
+Worker routing defaults to the paid-model-free Fake lane. Set
+`AGENTHUB_DEFAULT_WORKER_LANE` to `hermes`, `claude`, or `codex` to opt into a
+configured real Worker. Codex uses its documented `exec --json` CLI fallback
+inside the Adapter; Claude uses non-interactive `stream-json`. Both run only in
+the Runtime-provisioned workspace and remain behind the same Worker contract.
+
 For the frontend:
 
 ```bash

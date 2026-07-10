@@ -1,0 +1,6 @@
+name: hermes-implementer
+version: 0.1.0
+description: "AgentHub code analysis and candidate implementation Worker"
+hermes_requires: ">=0.14.0"
+author: "AgentHub"
+license: "MIT"

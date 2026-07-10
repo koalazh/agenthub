@@ -20,8 +20,16 @@ class Settings(BaseSettings):
     hermes_source_path: Path | None = None
     hermes_kanban_home: Path = Path("~/.hermes")
     hermes_probe_timeout_seconds: float = Field(default=1.0, gt=0, le=10)
+    agent_registry_path: Path = Path("config/agents.yaml")
+    default_worker_lane: str = Field(default="fake", pattern=r"^(fake|hermes|claude|codex)$")
 
-    @field_validator("data_dir", "hermes_source_path", "hermes_kanban_home", mode="after")
+    @field_validator(
+        "data_dir",
+        "hermes_source_path",
+        "hermes_kanban_home",
+        "agent_registry_path",
+        mode="after",
+    )
     @classmethod
     def expand_path(cls, value: Path | None) -> Path | None:
         return value.expanduser().resolve() if value is not None else None

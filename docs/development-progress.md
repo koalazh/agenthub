@@ -214,3 +214,28 @@ not part of the paid-model-free core suite.
 
 Next: Agent Registry/Resolver and External Lane Supervisor with Codex and Claude
 Adapters.
+
+## Heterogeneous Worker lanes increment
+
+Commit: `feat(adapter): add codex and claude worker lanes`
+
+Completed: YAML + persisted Agent Registry, capability/permission/availability
+Resolver, independent Reviewer exclusion, routing statistics, read-only Agent
+API, External Lane Supervisor, Codex `exec --json` fallback Adapter, Claude
+`stream-json` Adapter, subprocess-group cancellation, normalized lifecycle,
+usage/session capture, and configuration-selectable Hermes/Claude/Codex task
+materialization without changing the Hermes Task Kernel.
+
+Tests: Registry validation and hard filters, requested-Agent permission checks,
+all three lane bindings for one Harness, Codex/Claude JSONL event mapping,
+failure/cancel/result/Artifact handling, Supervisor routing, heterogeneous Codex
+implementation + Claude Review completion, statistics, Agent API restart, and
+five-step Task Kernel identity.
+
+Known limits: Codex App Server support remains a future enhancement; MVP uses
+the locally verified stable CLI fallback behind the same Adapter. Live Provider
+tests are opt-in to avoid paid calls. Claude's CLI sandbox is best-effort and
+must not be presented as stronger isolation than its local permission mode.
+
+Next: Real candidate Commit inspection, Approval/Merge, bounded Review repair,
+SSE/Web/Channel links, then resilience and security hardening.

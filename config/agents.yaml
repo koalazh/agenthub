@@ -1,4 +1,12 @@
 agents:
+  - id: hermes://implementer
+    runtime: hermes
+    profile: hermes-implementer
+    enabled: true
+    capabilities: [code-analysis, code-implementation, debugging]
+    constraints:
+      repository_write: true
+      max_parallel_runs: 1
   - id: hermes://reviewer
     runtime: hermes
     profile: hermes-reviewer
@@ -9,15 +17,15 @@ agents:
       max_parallel_runs: 2
   - id: claude://default
     runtime: claude
-    enabled: false
+    enabled: true
     capabilities: [code-analysis, code-implementation, code-review]
     constraints:
       repository_write: true
       max_parallel_runs: 1
   - id: codex://default
     runtime: codex
-    enabled: false
-    capabilities: [code-implementation, debugging, code-review]
+    enabled: true
+    capabilities: [code-analysis, code-implementation, debugging, code-review]
     constraints:
       repository_write: true
       max_parallel_runs: 1

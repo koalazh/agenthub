@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from agenthub.artifacts.store import ArtifactProvenance, ArtifactStore
 from agenthub.context.projector import project_task_envelope
 from agenthub.db.models import (
+    AgentStatsRecord,
     ArtifactRecord,
     GoalRecord,
     HarnessRunRecord,
@@ -27,8 +28,11 @@ from agenthub.harness.schema import (
     RuntimeGateStep,
 )
 from agenthub.hermes.kanban_adapter import HermesKanbanAdapter, task_body
+from agenthub.registry.models import AgentDefinition, AgentRegistryConfig
+from agenthub.registry.resolver import AgentDemand, resolve_agent
 from agenthub.workers.base import WorkerResultStatus, WorkerStartRequest
 from agenthub.workers.fake_adapter import FakeWorkerAdapter
+from agenthub.workers.supervisor import ExternalLaneSupervisor
 from agenthub.workspace.manager import WorkspaceManager
 
 
@@ -46,6 +50,10 @@ class RuntimeController:
         workspaces: WorkspaceManager,
         fake_worker: FakeWorkerAdapter | None = None,
         gate_runner: GateRunner | None = None,
+        registry: AgentRegistryConfig | None = None,
+        available_runtimes: frozenset[str] = frozenset(),
+        default_worker_lane: str = "fake",
+        external_supervisor: ExternalLaneSupervisor | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._kanban = kanban
@@ -53,6 +61,10 @@ class RuntimeController:
         self._workspaces = workspaces
         self._fake_worker = fake_worker or FakeWorkerAdapter()
         self._gate_runner = gate_runner or GateRunner()
+        self._registry = registry
+        self._available_runtimes = available_runtimes
+        self._default_worker_lane = default_worker_lane
+        self._external_supervisor = external_supervisor
 
     def start_goal(self, goal_id: str) -> str:
         with self._session_factory() as session:
@@ -218,6 +230,7 @@ class RuntimeController:
                     parent_mappings=[parent for parent in parent_mappings if parent],
                 )
                 outputs = self._outputs(step)
+                binding = self._binding_for_step(session, run, step)
                 task_id = self._kanban.create_task(
                     board=board,
                     title=f"{goal.title}: {step.id}",
@@ -231,7 +244,7 @@ class RuntimeController:
                         ),
                         output_contract=outputs,
                     ),
-                    assignee=self._agent_id(step),
+                    assignee=self._assignee(binding, step),
                     parents=parent_ids,
                     idempotency_key=f"{goal.id}:{version.version}:{step.id}:1",
                     workspace_kind=workspace_kind,
@@ -249,7 +262,9 @@ class RuntimeController:
                 if execution is None:
                     raise RuntimeExecutionError(f"step execution {step.id} is missing")
                 execution.kanban_task_id = task_id
-                execution.agent_id = self._agent_id(step)
+                execution.agent_id = (
+                    binding.id if binding is not None else self._fake_agent_id(step)
+                )
                 session.add(
                     TaskMappingRecord(
                         id=f"tm_{uuid4().hex}",
@@ -351,7 +366,7 @@ class RuntimeController:
                     continue
                 step = by_id[step_id]
                 if isinstance(step, (AgentCallStep, ReviewStep)):
-                    await self._execute_fake(session, run, goal, step, execution, mapping)
+                    await self._execute_worker(session, run, goal, step, execution, mapping)
                 elif isinstance(step, RuntimeGateStep):
                     self._execute_gate(session, run, goal, step, execution, mapping)
                 elif isinstance(step, FinalizeStep):
@@ -363,7 +378,7 @@ class RuntimeController:
                     break
             return progressed
 
-    async def _execute_fake(
+    async def _execute_worker(
         self,
         session: Session,
         run: HarnessRunRecord,
@@ -404,8 +419,22 @@ class RuntimeController:
             timeout_seconds=900,
             artifact_output_dir=self._artifacts.root / goal.id / step.id,
         )
-        handle = await self._fake_worker.start(request)
-        async for event in self._fake_worker.stream_events(handle):
+        if (execution.agent_id or "").startswith("fake://"):
+            handle = await self._fake_worker.start(request)
+            events = [event async for event in self._fake_worker.stream_events(handle)]
+            result = await self._fake_worker.collect_result(handle)
+        elif (execution.agent_id or "").startswith(("claude://", "codex://")):
+            if self._external_supervisor is None:
+                raise RuntimeExecutionError("External Lane Supervisor is unavailable")
+            supervised = await self._external_supervisor.run(request)
+            events = list(supervised.events)
+            result = supervised.result
+        else:
+            raise RuntimeExecutionError(
+                "Hermes Profile Lane is driven asynchronously by the native Dispatcher"
+            )
+        self._record_agent_stats(session, execution, step, result)
+        for event in events:
             _append_event(
                 session,
                 goal_id=goal.id,
@@ -414,7 +443,6 @@ class RuntimeController:
                 payload={"step_id": step.id, **event.payload},
                 correlation_id=run.id,
             )
-        result = await self._fake_worker.collect_result(handle)
         if result.status is not WorkerResultStatus.COMPLETED:
             self._kanban.block(
                 board=mapping.kanban_board,
@@ -474,6 +502,38 @@ class RuntimeController:
             correlation_id=run.id,
         )
         session.commit()
+
+    @staticmethod
+    def _record_agent_stats(
+        session: Session,
+        execution: StepExecutionRecord,
+        step: AgentCallStep | ReviewStep,
+        result: object,
+    ) -> None:
+        if not execution.agent_id or execution.agent_id.startswith("fake://"):
+            return
+        stats = session.get(AgentStatsRecord, execution.agent_id)
+        if stats is None:
+            return
+        now = datetime.now(UTC)
+        prior_runs = stats.completed_runs + stats.recent_failure_count
+        started = execution.started_at or now
+        latency_ms = max(0.0, (now - started).total_seconds() * 1000)
+        stats.average_latency_ms = (
+            (stats.average_latency_ms * prior_runs + latency_ms) / (prior_runs + 1)
+        )
+        usage = getattr(result, "usage", {})
+        cost = float(usage.get("cost_usd", 0.0)) if isinstance(usage, dict) else 0.0
+        stats.average_cost = (stats.average_cost * prior_runs + cost) / (prior_runs + 1)
+        if result.status is WorkerResultStatus.COMPLETED:
+            stats.completed_runs += 1
+            stats.recent_failure_count = 0
+            if isinstance(step, ReviewStep):
+                stats.verifier_total_count += 1
+                stats.verifier_pass_count += 1
+        else:
+            stats.recent_failure_count += 1
+        stats.last_used_at = now
 
     def _execute_gate(
         self,
@@ -655,12 +715,66 @@ class RuntimeController:
         session.commit()
 
     @staticmethod
-    def _agent_id(step: object) -> str:
+    def _fake_agent_id(step: object) -> str:
         if isinstance(step, ReviewStep):
             return "fake://reviewer"
         if isinstance(step, AgentCallStep):
             return "fake://default"
         return "agenthub://runtime"
+
+    def _binding_for_step(
+        self, session: Session, run: HarnessRunRecord, step: object
+    ) -> AgentDefinition | None:
+        if not isinstance(step, (AgentCallStep, ReviewStep)):
+            return None
+        selector = step.selector
+        if self._default_worker_lane == "fake" and selector.agent_id is None:
+            return None
+        if self._registry is None:
+            raise RuntimeExecutionError("Agent Registry is unavailable")
+        excluded_ids: set[str] = set()
+        for excluded_step in selector.exclude_agents_from:
+            execution = session.scalar(
+                select(StepExecutionRecord).where(
+                    StepExecutionRecord.harness_run_id == run.id,
+                    StepExecutionRecord.step_id == excluded_step,
+                    StepExecutionRecord.attempt == 1,
+                )
+            )
+            if execution and execution.agent_id:
+                excluded_ids.add(execution.agent_id)
+        requested = selector.agent_id
+        if requested is None and isinstance(step, AgentCallStep):
+            requested = next(
+                (
+                    agent.id
+                    for agent in self._registry.agents
+                    if agent.runtime == self._default_worker_lane
+                ),
+                None,
+            )
+        return resolve_agent(
+            self._registry,
+            AgentDemand(
+                capabilities=frozenset(selector.capabilities),
+                repository_write=(
+                    isinstance(step, AgentCallStep)
+                    and step.workspace.mode == "write_candidate"
+                ),
+                excluded_agent_ids=frozenset(excluded_ids),
+                requested_agent_id=requested,
+            ),
+            available_runtimes=self._available_runtimes,
+        )
+
+    @staticmethod
+    def _assignee(binding: AgentDefinition | None, step: object) -> str:
+        if binding is None:
+            return "fake:reviewer" if isinstance(step, ReviewStep) else "fake:default"
+        if binding.runtime == "hermes":
+            assert binding.profile is not None
+            return binding.profile
+        return binding.id.replace("://", ":", 1)
 
     @staticmethod
     def _outputs(step: object) -> tuple[str, ...]:
