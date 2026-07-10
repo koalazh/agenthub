@@ -1,0 +1,711 @@
+{
+  "$defs": {
+    "AgentCallStep": {
+      "additionalProperties": false,
+      "properties": {
+        "depends_on": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "agent_call",
+          "title": "Kind",
+          "type": "string"
+        },
+        "outputs": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Outputs",
+          "type": "array"
+        },
+        "role_overlay": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RoleOverlay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "selector": {
+          "$ref": "#/$defs/AgentSelector"
+        },
+        "task": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Task",
+          "type": "string"
+        },
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceSpec"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "task",
+        "selector",
+        "workspace",
+        "outputs"
+      ],
+      "title": "AgentCallStep",
+      "type": "object"
+    },
+    "AgentSelector": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "exclude_agents_from": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude Agents From",
+          "type": "array"
+        },
+        "prefer_binding_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prefer Binding From"
+        }
+      },
+      "title": "AgentSelector",
+      "type": "object"
+    },
+    "FinalizeStep": {
+      "additionalProperties": false,
+      "properties": {
+        "delivery": {
+          "enum": [
+            "candidate_commit",
+            "patch"
+          ],
+          "title": "Delivery",
+          "type": "string"
+        },
+        "depends_on": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "finalize",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "delivery"
+      ],
+      "title": "FinalizeStep",
+      "type": "object"
+    },
+    "GateCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Command",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "timeout_seconds": {
+          "default": 600,
+          "maximum": 3600,
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "command"
+      ],
+      "title": "GateCheck",
+      "type": "object"
+    },
+    "HarnessBounds": {
+      "additionalProperties": false,
+      "properties": {
+        "max_agent_runs": {
+          "minimum": 1,
+          "title": "Max Agent Runs",
+          "type": "integer"
+        },
+        "max_cost_usd": {
+          "exclusiveMinimum": 0,
+          "title": "Max Cost Usd",
+          "type": "number"
+        },
+        "max_loop_iterations": {
+          "minimum": 1,
+          "title": "Max Loop Iterations",
+          "type": "integer"
+        },
+        "max_parallelism": {
+          "minimum": 1,
+          "title": "Max Parallelism",
+          "type": "integer"
+        },
+        "max_patch_versions": {
+          "minimum": 1,
+          "title": "Max Patch Versions",
+          "type": "integer"
+        },
+        "max_wall_time_seconds": {
+          "minimum": 1,
+          "title": "Max Wall Time Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_parallelism",
+        "max_agent_runs",
+        "max_patch_versions",
+        "max_loop_iterations",
+        "max_wall_time_seconds",
+        "max_cost_usd"
+      ],
+      "title": "HarnessBounds",
+      "type": "object"
+    },
+    "HarnessMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "goal_id": {
+          "pattern": "^goal_[A-Za-z0-9_-]+$",
+          "title": "Goal Id",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "goal_id"
+      ],
+      "title": "HarnessMetadata",
+      "type": "object"
+    },
+    "InheritedStep": {
+      "additionalProperties": false,
+      "properties": {
+        "inherit_from": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Inherit From",
+          "type": "string"
+        }
+      },
+      "required": [
+        "inherit_from"
+      ],
+      "title": "InheritedStep",
+      "type": "object"
+    },
+    "LoopAgentCall": {
+      "additionalProperties": false,
+      "properties": {
+        "role_overlay": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RoleOverlay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "selector": {
+          "$ref": "#/$defs/AgentSelector"
+        },
+        "task": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Task",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task",
+        "selector"
+      ],
+      "title": "LoopAgentCall",
+      "type": "object"
+    },
+    "LoopBody": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_call": {
+          "$ref": "#/$defs/LoopAgentCall"
+        },
+        "review": {
+          "$ref": "#/$defs/InheritedStep"
+        },
+        "runtime_gate": {
+          "$ref": "#/$defs/InheritedStep"
+        }
+      },
+      "required": [
+        "agent_call",
+        "runtime_gate",
+        "review"
+      ],
+      "title": "LoopBody",
+      "type": "object"
+    },
+    "LoopStep": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/LoopBody"
+        },
+        "continue_when": {
+          "const": "review_requires_changes",
+          "title": "Continue When",
+          "type": "string"
+        },
+        "depends_on": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "loop",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_iterations": {
+          "minimum": 1,
+          "title": "Max Iterations",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "max_iterations",
+        "continue_when",
+        "body"
+      ],
+      "title": "LoopStep",
+      "type": "object"
+    },
+    "ParallelBranch": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_call": {
+          "$ref": "#/$defs/AgentCallStep"
+        },
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "agent_call"
+      ],
+      "title": "ParallelBranch",
+      "type": "object"
+    },
+    "ParallelStep": {
+      "additionalProperties": false,
+      "properties": {
+        "branches": {
+          "items": {
+            "$ref": "#/$defs/ParallelBranch"
+          },
+          "minItems": 2,
+          "title": "Branches",
+          "type": "array"
+        },
+        "depends_on": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "parallel",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "branches"
+      ],
+      "title": "ParallelStep",
+      "type": "object"
+    },
+    "ReviewStep": {
+      "additionalProperties": false,
+      "properties": {
+        "depends_on": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "inputs": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Inputs",
+          "type": "array"
+        },
+        "kind": {
+          "const": "review",
+          "title": "Kind",
+          "type": "string"
+        },
+        "outputs": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Outputs",
+          "type": "array"
+        },
+        "selector": {
+          "$ref": "#/$defs/AgentSelector"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "selector",
+        "inputs",
+        "outputs"
+      ],
+      "title": "ReviewStep",
+      "type": "object"
+    },
+    "RoleOverlay": {
+      "additionalProperties": false,
+      "properties": {
+        "instructions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Instructions",
+          "type": "array"
+        },
+        "mission": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mission"
+        },
+        "role": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role"
+      ],
+      "title": "RoleOverlay",
+      "type": "object"
+    },
+    "RuntimeGateStep": {
+      "additionalProperties": false,
+      "properties": {
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/GateCheck"
+          },
+          "minItems": 1,
+          "title": "Checks",
+          "type": "array"
+        },
+        "depends_on": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "runtime_gate",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "checks"
+      ],
+      "title": "RuntimeGateStep",
+      "type": "object"
+    },
+    "WaitApprovalStep": {
+      "additionalProperties": false,
+      "properties": {
+        "approval_type": {
+          "enum": [
+            "capability",
+            "budget",
+            "harness_launch",
+            "human_input"
+          ],
+          "title": "Approval Type",
+          "type": "string"
+        },
+        "depends_on": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "wait_approval",
+          "title": "Kind",
+          "type": "string"
+        },
+        "prompt": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Prompt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "approval_type",
+        "prompt"
+      ],
+      "title": "WaitApprovalStep",
+      "type": "object"
+    },
+    "WorkspaceSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "read_only",
+            "write_candidate"
+          ],
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "title": "WorkspaceSpec",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "api_version": {
+      "const": "agenthub.io/harness/v1",
+      "title": "Api Version",
+      "type": "string"
+    },
+    "bounds": {
+      "$ref": "#/$defs/HarnessBounds"
+    },
+    "kind": {
+      "const": "ProgressiveHarness",
+      "title": "Kind",
+      "type": "string"
+    },
+    "mandatory_gates": {
+      "items": {
+        "enum": [
+          "tests",
+          "independent_review"
+        ],
+        "type": "string"
+      },
+      "title": "Mandatory Gates",
+      "type": "array",
+      "uniqueItems": true
+    },
+    "metadata": {
+      "$ref": "#/$defs/HarnessMetadata"
+    },
+    "steps": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "agent_call": "#/$defs/AgentCallStep",
+            "finalize": "#/$defs/FinalizeStep",
+            "loop": "#/$defs/LoopStep",
+            "parallel": "#/$defs/ParallelStep",
+            "review": "#/$defs/ReviewStep",
+            "runtime_gate": "#/$defs/RuntimeGateStep",
+            "wait_approval": "#/$defs/WaitApprovalStep"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/AgentCallStep"
+          },
+          {
+            "$ref": "#/$defs/ParallelStep"
+          },
+          {
+            "$ref": "#/$defs/RuntimeGateStep"
+          },
+          {
+            "$ref": "#/$defs/ReviewStep"
+          },
+          {
+            "$ref": "#/$defs/LoopStep"
+          },
+          {
+            "$ref": "#/$defs/WaitApprovalStep"
+          },
+          {
+            "$ref": "#/$defs/FinalizeStep"
+          }
+        ]
+      },
+      "minItems": 1,
+      "title": "Steps",
+      "type": "array"
+    }
+  },
+  "required": [
+    "api_version",
+    "kind",
+    "metadata",
+    "bounds",
+    "mandatory_gates",
+    "steps"
+  ],
+  "title": "ProgressiveHarness",
+  "type": "object"
+}

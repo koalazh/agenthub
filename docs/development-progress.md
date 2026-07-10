@@ -57,3 +57,21 @@ Known limits: Persistence and HTTP creation are part of the following
 Milestone 1 increments.
 
 Next: Typed Harness IR and static validation.
+
+## Typed Harness increment
+
+Commit: `feat(harness): add typed harness IR`
+
+Completed: Strict Harness IR v1 models for all seven MVP node kinds, generated
+JSON Schema, dependency and cycle checks, Runtime policy bounds, static Agent
+run estimates, mandatory Runtime Gate/finalize checks, independent Reviewer
+constraints, and bounded repair-loop inheritance.
+
+Tests: Valid IR, unknown node rejection, untyped field rejection, mandatory
+gates, dependency references/cycles, bounds, independent Review, Agent run cap,
+loop inheritance, and committed-schema consistency.
+
+Known limits: Harness versions and patches are not persisted yet.
+
+Next: AgentHub database models, immutable Harness versions/patch validation,
+event store, compilation summary, and REST API.
