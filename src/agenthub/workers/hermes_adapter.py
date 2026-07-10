@@ -1,3 +1,4 @@
+import json
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -6,6 +7,7 @@ from uuid import uuid4
 from agenthub.hermes.kanban_adapter import HermesKanbanAdapter
 from agenthub.workers.base import (
     AgentRuntimeDescriptor,
+    ProducedArtifact,
     WorkerEvent,
     WorkerEventType,
     WorkerHandle,
@@ -136,9 +138,52 @@ class HermesProfileWorkerAdapter:
         }:
             raise RuntimeError(f"Hermes task {task.id} is not terminal: {task.status}")
         status = status_map.get(task.status, WorkerResultStatus.FAILED)
+        requested = tuple(
+            str(kind)
+            for kind in run.request.task_envelope.get("output_contract", {}).get(
+                "artifacts", []
+            )
+        )
+        terminal_event = next(
+            (
+                event
+                for event in reversed(
+                    self._kanban.list_events(
+                        board=run.board, task_id=run.request.kanban_task_id
+                    )
+                )
+                if event.kind in {"completed", "blocked", "crashed", "gave_up", "timed_out"}
+            ),
+            None,
+        )
+        payload = terminal_event.payload if terminal_event and terminal_event.payload else {}
+        summary = str(payload.get("summary") or f"Hermes task {task.id} ended with {task.status}")
+        artifacts: list[ProducedArtifact] = []
+        for kind in requested:
+            if kind == "review_report":
+                try:
+                    review = json.loads(summary)
+                except json.JSONDecodeError:
+                    review = {"decision": None, "findings": []}
+                content = json.dumps(review).encode()
+                media_type = "application/json"
+                filename = "review_report.json"
+            else:
+                content = f"{summary}\n".encode()
+                media_type = "text/plain"
+                filename = f"{kind}.txt"
+            artifacts.append(
+                ProducedArtifact(
+                    kind=kind,
+                    filename=filename,
+                    media_type=media_type,
+                    content=content,
+                )
+            )
         return WorkerResult(
             status=status,
-            summary=f"Hermes task {task.id} ended with status {task.status}",
+            summary=summary,
+            artifacts=tuple(artifacts),
             session_ref=f"hermes-kanban://{run.board}/{task.id}",
         )
 

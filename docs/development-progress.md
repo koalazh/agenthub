@@ -352,3 +352,24 @@ an HTTP transport fake and do not make paid calls.
 
 Next: Enforce run/cost/concurrency bounds, reconcile Hermes/External state after
 restart, audit installation docs, and execute the final acceptance matrix.
+
+## Hermes Controller execution increment
+
+Commit: `feat(adapter): reconcile hermes profile lane in runtime`
+
+Completed: Controller execution through Hermes native Dispatcher, Dispatcher-
+owned Claim semantics, event polling and Run identity capture, terminal result
+normalization, candidate Commit inspection, strict ReviewResult extraction from
+Kanban completion summaries, and no duplicate Runtime completion write.
+
+Tests: Hermes implementer writes and commits in the Runtime Worktree, Hermes
+reviewer returns independent structured Review, native Dispatcher events reach
+the Goal log, Runtime Gate completes the Goal, full Python suite, Ruff, and Web
+build.
+
+Known limits: Live model-backed Hermes execution remains credential-dependent;
+the core integration test uses the real Dispatcher/Board with a deterministic
+spawn callback.
+
+Next: Runtime budget/deadline checks, restart reconciliation, security audit,
+documentation, and final acceptance evidence.

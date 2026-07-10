@@ -59,7 +59,7 @@ async def test_hermes_adapter_reuses_dispatcher_and_normalizes_events(tmp_path: 
             board=board,
             task_id=task.id,
             expected_run_id=task.current_run_id,
-            summary="Review passed",
+            summary='{"decision":"pass","findings":[]}',
             metadata={"decision": "pass"},
         )
 
@@ -82,6 +82,8 @@ async def test_hermes_adapter_reuses_dispatcher_and_normalizes_events(tmp_path: 
     ]
     assert result.status is WorkerResultStatus.COMPLETED
     assert result.session_ref == f"hermes-kanban://{board}/{task_id}"
+    assert result.artifacts[0].kind == "review_report"
+    assert b'"decision": "pass"' in result.artifacts[0].content
     assert repeated_events == []
 
 

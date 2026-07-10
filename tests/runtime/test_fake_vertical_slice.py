@@ -483,6 +483,57 @@ def test_same_harness_materializes_to_configured_worker_lane(
     assert len(detail["task_mappings"]) == 5
 
 
+def test_hermes_lane_executes_through_native_dispatcher(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    initialize_project(project)
+    settings = runtime_settings(tmp_path).model_copy(update={"default_worker_lane": "hermes"})
+    for profile in ("hermes-implementer", "hermes-reviewer"):
+        (settings.hermes_kanban_home / "profiles" / profile).mkdir(parents=True)
+    app = create_app(settings)
+
+    def spawn(task: object, _: str, *, board: str) -> None:
+        if task.title.endswith(": implement"):
+            workspace = Path(task.workspace_path)
+            (workspace / "hermes-change.txt").write_text("candidate\n", encoding="utf-8")
+            subprocess.run(["git", "add", "hermes-change.txt"], cwd=workspace, check=True)
+            subprocess.run(
+                ["git", "commit", "-m", "feat: hermes candidate"],
+                cwd=workspace,
+                check=True,
+                capture_output=True,
+            )
+        summary = (
+            '{"decision":"pass","findings":[]}'
+            if task.assignee == "hermes-reviewer"
+            else f"Hermes completed {task.title}"
+        )
+        assert app.state.runtime_controller._kanban.complete(
+            board=board,
+            task_id=task.id,
+            expected_run_id=task.current_run_id,
+            summary=summary,
+            metadata={},
+        )
+
+    app.state.runtime_controller._hermes_spawn_fn = spawn
+    with TestClient(app) as client:
+        goal_id = create_goal(client, project)
+        client.post(f"/api/goals/{goal_id}/harness", json=executable_harness(goal_id))
+
+        response = client.post(f"/api/goals/{goal_id}/execute")
+        detail = response.json()
+
+    assert response.status_code == 200, response.text
+    assert detail["goal"]["status"] == "completed"
+    agents = {step["agent_id"] for step in detail["step_executions"]}
+    assert "hermes://implementer" in agents
+    assert "hermes://reviewer" in agents
+    candidate = next(
+        artifact for artifact in detail["artifacts"] if artifact["kind"] == "candidate_commit"
+    )
+    assert candidate["metadata"]["commit_sha"]
+
+
 def test_codex_implementation_and_claude_review_execute_through_supervisor(
     tmp_path: Path,
 ) -> None:

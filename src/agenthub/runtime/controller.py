@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,8 +39,15 @@ from agenthub.harness.schema import (
 from agenthub.hermes.kanban_adapter import HermesKanbanAdapter, task_body
 from agenthub.registry.models import AgentDefinition, AgentRegistryConfig
 from agenthub.registry.resolver import AgentDemand, resolve_agent
-from agenthub.workers.base import ProducedArtifact, WorkerResultStatus, WorkerStartRequest
+from agenthub.workers.base import (
+    ProducedArtifact,
+    WorkerEvent,
+    WorkerResult,
+    WorkerResultStatus,
+    WorkerStartRequest,
+)
 from agenthub.workers.fake_adapter import FakeWorkerAdapter
+from agenthub.workers.hermes_adapter import HermesProfileWorkerAdapter
 from agenthub.workers.supervisor import ExternalLaneSupervisor
 from agenthub.workspace.manager import WorkspaceError, WorkspaceManager
 
@@ -73,6 +81,7 @@ class RuntimeController:
         self._available_runtimes = available_runtimes
         self._default_worker_lane = default_worker_lane
         self._external_supervisor = external_supervisor
+        self._hermes_spawn_fn = None
 
     def start_goal(self, goal_id: str) -> str:
         with self._session_factory() as session:
@@ -422,16 +431,25 @@ class RuntimeController:
         execution: StepExecutionRecord,
         mapping: TaskMappingRecord,
     ) -> None:
-        claimer = f"agenthub:{run.id}:{step.id}"
-        claimed = self._kanban.claim_task(
-            board=mapping.kanban_board,
-            task_id=mapping.kanban_task_id,
-            claimer=claimer,
-            ttl_seconds=900,
-        )
-        if claimed is None or claimed.current_run_id is None:
-            return
-        mapping.expected_run_id = claimed.current_run_id
+        hermes_lane = (execution.agent_id or "").startswith("hermes://")
+        if hermes_lane:
+            claimed = self._kanban.get_task(
+                board=mapping.kanban_board, task_id=mapping.kanban_task_id
+            )
+            if claimed is None or claimed.status != "ready":
+                return
+            worker_run_id = 0
+        else:
+            claimed = self._kanban.claim_task(
+                board=mapping.kanban_board,
+                task_id=mapping.kanban_task_id,
+                claimer=f"agenthub:{run.id}:{step.id}",
+                ttl_seconds=900,
+            )
+            if claimed is None or claimed.current_run_id is None:
+                return
+            worker_run_id = claimed.current_run_id
+            mapping.expected_run_id = worker_run_id
         execution.status = "running"
         execution.started_at = datetime.now(UTC)
         if isinstance(step, ReviewStep):
@@ -447,7 +465,7 @@ class RuntimeController:
             goal_id=goal.id,
             task_id=step.id,
             kanban_task_id=mapping.kanban_task_id,
-            expected_run_id=claimed.current_run_id,
+            expected_run_id=worker_run_id,
             agent_id=execution.agent_id or "fake://default",
             task_envelope=self._task_envelope(session, goal, run, step, workspace_path),
             workspace_path=workspace_path,
@@ -464,10 +482,27 @@ class RuntimeController:
             supervised = await self._external_supervisor.run(request)
             events = list(supervised.events)
             result = supervised.result
-        else:
-            raise RuntimeExecutionError(
-                "Hermes Profile Lane is driven asynchronously by the native Dispatcher"
+        elif (execution.agent_id or "").startswith("hermes://"):
+            events, result = await self._run_hermes_worker(request, mapping)
+            terminal_event = next(
+                (
+                    event
+                    for event in reversed(
+                        self._kanban.list_events(
+                            board=mapping.kanban_board,
+                            task_id=mapping.kanban_task_id,
+                        )
+                    )
+                    if event.run_id is not None
+                ),
+                None,
             )
+            if terminal_event is None or terminal_event.run_id is None:
+                raise RuntimeExecutionError("Hermes Worker did not produce a Run identity")
+            worker_run_id = terminal_event.run_id
+            mapping.expected_run_id = worker_run_id
+        else:
+            raise RuntimeExecutionError(f"unsupported Worker binding {execution.agent_id}")
         self._record_usage(session, run, execution, mapping, result)
         for event in events:
             _append_event(
@@ -480,12 +515,13 @@ class RuntimeController:
             )
         if result.status is not WorkerResultStatus.COMPLETED:
             self._record_agent_stats(session, execution, step, result)
-            self._kanban.block(
-                board=mapping.kanban_board,
-                task_id=mapping.kanban_task_id,
-                expected_run_id=claimed.current_run_id,
-                reason=f"worker-failed: {result.summary}",
-            )
+            if not hermes_lane:
+                self._kanban.block(
+                    board=mapping.kanban_board,
+                    task_id=mapping.kanban_task_id,
+                    expected_run_id=worker_run_id,
+                    reason=f"worker-failed: {result.summary}",
+                )
             self._fail_run(session, run, goal, execution, result.summary)
             return
 
@@ -494,12 +530,13 @@ class RuntimeController:
             try:
                 review_decision = self._parse_review_decision(result.artifacts)
             except RuntimeExecutionError as exc:
-                self._kanban.block(
-                    board=mapping.kanban_board,
-                    task_id=mapping.kanban_task_id,
-                    expected_run_id=claimed.current_run_id,
-                    reason=f"review-invalid: {exc}",
-                )
+                if not hermes_lane:
+                    self._kanban.block(
+                        board=mapping.kanban_board,
+                        task_id=mapping.kanban_task_id,
+                        expected_run_id=worker_run_id,
+                        reason=f"review-invalid: {exc}",
+                    )
                 self._fail_run(session, run, goal, execution, str(exc))
                 return
 
@@ -520,12 +557,13 @@ class RuntimeController:
                     base_commit=mapping.base_commit,
                 )
             except WorkspaceError as exc:
-                self._kanban.block(
-                    board=mapping.kanban_board,
-                    task_id=mapping.kanban_task_id,
-                    expected_run_id=claimed.current_run_id,
-                    reason=f"candidate-invalid: {exc}",
-                )
+                if not hermes_lane:
+                    self._kanban.block(
+                        board=mapping.kanban_board,
+                        task_id=mapping.kanban_task_id,
+                        expected_run_id=worker_run_id,
+                        reason=f"candidate-invalid: {exc}",
+                    )
                 self._fail_run(session, run, goal, execution, str(exc))
                 return
             candidate_metadata = {
@@ -567,7 +605,7 @@ class RuntimeController:
                 provenance=ArtifactProvenance(
                     goal_id=goal.id,
                     task_id=step.id,
-                    run_id=f"{mapping.kanban_board}:{claimed.current_run_id}",
+                    run_id=f"{mapping.kanban_board}:{worker_run_id}",
                     created_by_agent=execution.agent_id or "fake://default",
                 ),
                 kind=produced.kind,
@@ -584,15 +622,16 @@ class RuntimeController:
                 payload={"step_id": step.id, "artifact_id": record.id, "kind": record.kind},
                 correlation_id=run.id,
             )
-        if not self._kanban.complete(
-            board=mapping.kanban_board,
-            task_id=mapping.kanban_task_id,
-            expected_run_id=claimed.current_run_id,
-            summary=result.summary,
-            metadata={"artifacts": artifact_uris},
-        ):
-            self._fail_run(session, run, goal, execution, "stale worker completion rejected")
-            return
+        if not hermes_lane:
+            if not self._kanban.complete(
+                board=mapping.kanban_board,
+                task_id=mapping.kanban_task_id,
+                expected_run_id=worker_run_id,
+                summary=result.summary,
+                metadata={"artifacts": artifact_uris},
+            ):
+                self._fail_run(session, run, goal, execution, "stale worker completion rejected")
+                return
         execution.status = "succeeded"
         execution.ended_at = datetime.now(UTC)
         result_json = result.model_dump(mode="json", exclude={"artifacts"})
@@ -619,6 +658,41 @@ class RuntimeController:
             correlation_id=run.id,
         )
         session.commit()
+
+    async def _run_hermes_worker(
+        self, request: WorkerStartRequest, mapping: TaskMappingRecord
+    ) -> tuple[list[WorkerEvent], WorkerResult]:
+        if self._registry is None:
+            raise RuntimeExecutionError("Agent Registry is unavailable")
+        definition = next(
+            (agent for agent in self._registry.agents if agent.id == request.agent_id), None
+        )
+        if definition is None or definition.profile is None:
+            raise RuntimeExecutionError(f"Hermes binding {request.agent_id} has no Profile")
+        adapter = HermesProfileWorkerAdapter(
+            kanban=self._kanban,
+            board=mapping.kanban_board,
+            agent_id=definition.id,
+            profile=definition.profile,
+            spawn_fn=self._hermes_spawn_fn,
+        )
+        handle = await adapter.start(request)
+        events: list[WorkerEvent] = []
+        deadline = asyncio.get_running_loop().time() + request.timeout_seconds
+        terminal = {"done", "blocked", "archived", "crashed", "gave_up", "timed_out"}
+        while True:
+            events.extend([event async for event in adapter.stream_events(handle)])
+            task = self._kanban.get_task(
+                board=mapping.kanban_board, task_id=mapping.kanban_task_id
+            )
+            if task is None:
+                raise RuntimeExecutionError("Hermes Worker task disappeared")
+            if task.status in terminal:
+                return events, await adapter.collect_result(handle)
+            if asyncio.get_running_loop().time() >= deadline:
+                await adapter.cancel(handle)
+                return events, await adapter.collect_result(handle)
+            await asyncio.sleep(0.1)
 
     @staticmethod
     def _record_agent_stats(
