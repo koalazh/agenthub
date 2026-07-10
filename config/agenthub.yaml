@@ -1,0 +1,17 @@
+agenthub:
+  host: 127.0.0.1
+  port: 8787
+  data_dir: ~/.agenthub
+  database_url: sqlite:///~/.agenthub/agenthub.db
+
+hermes:
+  source_path: null
+  api_base_url: http://127.0.0.1:8642
+  kanban_home: ~/.hermes
+  hub_profile: agenthub-hub
+
+execution:
+  max_parallelism: 3
+  reconcile_interval_seconds: 2
+  default_task_timeout_seconds: 1800
+  candidate_only: true

@@ -1,0 +1,23 @@
+agents:
+  - id: hermes://reviewer
+    runtime: hermes
+    profile: hermes-reviewer
+    enabled: true
+    capabilities: [code-review, architecture-review]
+    constraints:
+      repository_write: false
+      max_parallel_runs: 2
+  - id: claude://default
+    runtime: claude
+    enabled: false
+    capabilities: [code-analysis, code-implementation, code-review]
+    constraints:
+      repository_write: true
+      max_parallel_runs: 1
+  - id: codex://default
+    runtime: codex
+    enabled: false
+    capabilities: [code-implementation, debugging, code-review]
+    constraints:
+      repository_write: true
+      max_parallel_runs: 1
