@@ -96,3 +96,22 @@ Milestone 2. Event delivery is JSON polling; SSE arrives in Milestone 6.
 
 Next: Hermes Kanban Adapter, task mapping, FakeWorker, Artifact Store, Runtime
 Gate, reconciliation, and restart recovery.
+
+## Hermes Kanban Adapter increment
+
+Commit: `feat(hermes): add kanban task kernel adapter`
+
+Completed: Feature-detected thin Adapter over the real Hermes public Kanban
+API, stable per-project Board naming, idempotent Task creation, lifecycle
+claim/heartbeat/complete/block calls, expected Run protection, task/event
+snapshots, and the machine-readable AgentHub Task header.
+
+Tests: Real Hermes `0.14.0` temporary Board lifecycle, idempotent Task key,
+heartbeat, stale Run completion rejection, completion events, body header, Board
+slug bounds, and incompatible API rejection.
+
+Known limits: No AgentHub Step mapping or Worker execution is part of this
+increment.
+
+Next: Persist Task mappings and materialize executable steps, then execute them
+through FakeWorker and reconcile results.
