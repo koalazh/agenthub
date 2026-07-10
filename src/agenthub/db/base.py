@@ -3,6 +3,11 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+
+
+class Base(DeclarativeBase):
+    pass
 
 
 def create_database_engine(database_url: str) -> Engine:
@@ -10,6 +15,10 @@ def create_database_engine(database_url: str) -> Engine:
         database_path = Path(database_url.removeprefix("sqlite:///"))
         database_path.parent.mkdir(parents=True, exist_ok=True)
     return create_engine(database_url)
+
+
+def create_session_factory(engine: Engine) -> sessionmaker[Session]:
+    return sessionmaker(engine, expire_on_commit=False)
 
 
 def check_database(engine: Engine) -> dict[str, str]:

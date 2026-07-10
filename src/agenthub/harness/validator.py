@@ -116,6 +116,21 @@ def _validate_graph(harness: ProgressiveHarness, errors: list[str]) -> None:
     for step_id in ids:
         visit(step_id)
 
+    finalizers = [step for step in harness.steps if step.kind == "finalize"]
+    if len(finalizers) == 1:
+        ancestors: set[str] = set()
+
+        def collect_ancestors(step_id: str) -> None:
+            for parent in dependencies.get(step_id, set()):
+                if parent in ids and parent not in ancestors:
+                    ancestors.add(parent)
+                    collect_ancestors(parent)
+
+        collect_ancestors(finalizers[0].id)
+        disconnected = ids - ancestors - {finalizers[0].id}
+        if disconnected:
+            errors.append(f"steps do not contribute to finalize: {sorted(disconnected)}")
+
 
 def _validate_required_steps(harness: ProgressiveHarness, errors: list[str]) -> None:
     gates = [step for step in harness.steps if isinstance(step, RuntimeGateStep)]

@@ -207,3 +207,21 @@ def test_committed_json_schema_matches_model() -> None:
     assert json.loads(schema_path.read_text(encoding="utf-8")) == (
         ProgressiveHarness.model_json_schema()
     )
+
+
+def test_every_step_must_contribute_to_finalize() -> None:
+    payload = valid_harness()
+    payload["steps"].insert(
+        -1,
+        {
+            "id": "orphan",
+            "kind": "wait_approval",
+            "depends_on": ["review"],
+            "approval_type": "human_input",
+            "prompt": "Unused approval",
+        },
+    )
+    harness = parse_harness(payload)
+
+    with pytest.raises(HarnessValidationError, match="do not contribute to finalize"):
+        validate_harness(harness, goal_id="goal_test")

@@ -75,3 +75,24 @@ Known limits: Harness versions and patches are not persisted yet.
 
 Next: AgentHub database models, immutable Harness versions/patch validation,
 event store, compilation summary, and REST API.
+
+## Goal and Harness persistence increment
+
+Commit: `feat(api): persist goals and harness versions`
+
+Completed: Goal/Harness/Event SQLite models and migration, atomic Goal and
+Harness events, immutable Logical IR history, optimistic Patch base-version
+checks, semantic-contract hash protection, bounded Patch count, typed Patch
+operations, deterministic Physical Plan summaries, and Goal/Harness/Event REST
+endpoints.
+
+Tests: API creation and restart recovery, initial compilation, version lineage,
+immutable prior IR, semantic hash preservation, audit events, stale/invalid
+Patch rejection, patch-count bounds, Goal identity validation, and finalize
+reachability.
+
+Known limits: Physical Plans are not materialized into Hermes Kanban until
+Milestone 2. Event delivery is JSON polling; SSE arrives in Milestone 6.
+
+Next: Hermes Kanban Adapter, task mapping, FakeWorker, Artifact Store, Runtime
+Gate, reconciliation, and restart recovery.

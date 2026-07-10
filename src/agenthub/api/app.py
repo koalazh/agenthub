@@ -3,7 +3,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from agenthub import __version__
-from agenthub.db.base import check_database, create_database_engine
+from agenthub.api.goals import router as goals_router
+from agenthub.db.base import check_database, create_database_engine, create_session_factory
 from agenthub.db.migrations import upgrade_database
 from agenthub.hermes.health import hermes_health
 from agenthub.settings import Settings, get_settings
@@ -12,6 +13,7 @@ from agenthub.settings import Settings, get_settings
 def create_app(settings: Settings | None = None) -> FastAPI:
     active_settings = settings or get_settings()
     engine = create_database_engine(active_settings.database_url)
+    session_factory = create_session_factory(engine)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -20,6 +22,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         engine.dispose()
 
     app = FastAPI(title="AgentHub", version=__version__, lifespan=lifespan)
+    app.state.session_factory = session_factory
+    app.include_router(goals_router)
 
     @app.get("/health")
     async def health() -> dict[str, str]:
