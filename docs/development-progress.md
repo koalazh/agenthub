@@ -115,3 +115,22 @@ increment.
 
 Next: Persist Task mappings and materialize executable steps, then execute them
 through FakeWorker and reconcile results.
+
+## Worker contract and Artifact increment
+
+Commit: `feat(runtime): add fake worker and artifact store`
+
+Completed: Runtime-neutral Worker request/handle/event/result contracts, the
+full normalized MVP event vocabulary, deterministic success/failure/cancel
+FakeAdapter behavior, and an atomic local Artifact Store with mandatory
+Goal/Task/Run/Agent provenance, SHA256, size, media type, and database metadata.
+
+Tests: Adapter success/failure/cancel event sequences, normalized result and
+output artifacts, Artifact content/hash persistence, and missing-provenance
+rejection.
+
+Known limits: The FakeAdapter result is not yet committed into Hermes lifecycle
+state; only Runtime will perform that commit in the next increment.
+
+Next: HarnessRun/StepExecution/TaskMapping persistence and the reconciled Fake
+vertical slice with deterministic Runtime Gate.

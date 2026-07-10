@@ -1,0 +1,1 @@
+"""Worker Adapter contract tests."""

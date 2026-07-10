@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
@@ -58,3 +58,22 @@ class EventRecord(Base):
     payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     correlation_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ArtifactRecord(Base):
+    __tablename__ = "artifacts"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    goal_id: Mapped[str] = mapped_column(ForeignKey("goals.id"), nullable=False, index=True)
+    task_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(100), nullable=False)
+    uri: Mapped[str] = mapped_column(Text, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(200), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_by_agent: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
