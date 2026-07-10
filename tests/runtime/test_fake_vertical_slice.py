@@ -1,12 +1,14 @@
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from agenthub.api.app import create_app
+from agenthub.db.models import HarnessRunRecord, StepExecutionRecord, TaskMappingRecord
 from agenthub.hermes.kanban_adapter import HermesKanbanAdapter
 from agenthub.settings import Settings
 from agenthub.workers.claude_adapter import ClaudeWorkerAdapter
@@ -420,6 +422,97 @@ def test_worker_failure_is_committed_by_runtime_not_adapter(tmp_path: Path) -> N
     assert next(
         step["status"] for step in detail["step_executions"] if step["step_id"] == "inspect"
     ) == "failed"
+
+
+def test_reported_worker_cost_cannot_exceed_harness_budget(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    initialize_project(project)
+    app = create_app(runtime_settings(tmp_path))
+    app.state.runtime_controller._fake_worker = FakeWorkerAdapter(
+        usage={"input_tokens": 10, "output_tokens": 5, "cost_usd": 25.0}
+    )
+    with TestClient(app) as client:
+        goal_id = create_goal(client, project)
+        client.post(f"/api/goals/{goal_id}/harness", json=executable_harness(goal_id))
+
+        detail = client.post(f"/api/goals/{goal_id}/execute").json()
+
+    assert detail["goal"]["status"] == "failed"
+    assert detail["usage_summary"]["cost_usd"] == 25.0
+    assert next(
+        step["result"]["failure"]
+        for step in detail["step_executions"]
+        if step["status"] == "failed"
+    ) == "Harness cost budget exceeded"
+
+
+def test_wall_time_budget_is_enforced_after_restart(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    initialize_project(project)
+    app = create_app(runtime_settings(tmp_path))
+    with TestClient(app) as client:
+        goal_id = create_goal(client, project)
+        client.post(f"/api/goals/{goal_id}/harness", json=executable_harness(goal_id))
+        run_id = app.state.runtime_controller.start_goal(goal_id)
+        with app.state.session_factory() as session:
+            run = session.get(HarnessRunRecord, run_id)
+            run.started_at = datetime.now(UTC) - timedelta(seconds=3601)
+            session.commit()
+
+        detail = client.post(f"/api/goals/{goal_id}/execute").json()
+
+    assert detail["goal"]["status"] == "failed"
+    assert next(
+        step["result"]["failure"]
+        for step in detail["step_executions"]
+        if step["status"] == "failed"
+    ) == "Harness wall-time budget exceeded"
+
+
+def test_restart_reconciliation_terminates_lost_worker_supervision(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    initialize_project(project)
+    settings = runtime_settings(tmp_path)
+    app = create_app(settings)
+    with TestClient(app) as client:
+        goal_id = create_goal(client, project)
+        client.post(f"/api/goals/{goal_id}/harness", json=executable_harness(goal_id))
+        run_id = app.state.runtime_controller.start_goal(goal_id)
+        with app.state.session_factory() as session:
+            execution = session.query(StepExecutionRecord).filter_by(
+                harness_run_id=run_id, step_id="inspect"
+            ).one()
+            mapping = session.query(TaskMappingRecord).filter_by(
+                harness_run_id=run_id, step_id="inspect"
+            ).one()
+            claimed = app.state.runtime_controller._kanban.claim_task(
+                board=mapping.kanban_board,
+                task_id=mapping.kanban_task_id,
+                claimer="lost-controller",
+                ttl_seconds=900,
+            )
+            execution.status = "running"
+            execution.started_at = datetime.now(UTC)
+            mapping.expected_run_id = claimed.current_run_id
+            session.commit()
+
+    with TestClient(create_app(settings)) as restarted_client:
+        detail = restarted_client.get(f"/api/goals/{goal_id}").json()
+
+    assert detail["goal"]["status"] == "failed"
+    assert detail["harness_runs"][0]["status"] == "failed"
+    assert "Runtime restart" in next(
+        step["result"]["failure"]
+        for step in detail["step_executions"]
+        if step["step_id"] == "inspect"
+    )
+    board = detail["task_mappings"][0]["kanban_board"]
+    kanban = HermesKanbanAdapter(
+        hermes_home=settings.hermes_kanban_home, source_path=HERMES_SOURCE
+    )
+    assert kanban.list_tasks(board=board) == []
 
 
 def test_cancel_archives_materialized_kanban_tasks(tmp_path: Path) -> None:

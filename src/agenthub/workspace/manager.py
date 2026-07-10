@@ -103,6 +103,18 @@ class WorkspaceManager:
             changed_files=changed_files,
         )
 
+    def current_commit(self, workspace_path: Path) -> str:
+        return self._git(workspace_path.resolve(), "rev-parse", "HEAD").strip()
+
+    def assert_read_only_unchanged(
+        self, *, workspace_path: Path, expected_commit: str
+    ) -> None:
+        workspace = workspace_path.resolve()
+        if self.current_commit(workspace) != expected_commit:
+            raise WorkspaceError("read-only Worker changed the workspace Commit")
+        if self._git(workspace, "status", "--porcelain").strip():
+            raise WorkspaceError("read-only Worker modified the workspace")
+
     def merge_candidate(
         self,
         *,

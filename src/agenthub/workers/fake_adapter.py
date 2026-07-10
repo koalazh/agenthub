@@ -26,10 +26,15 @@ class _FakeRun:
 
 class FakeWorkerAdapter:
     def __init__(
-        self, *, fail: bool = False, review_decisions: tuple[str, ...] = ("pass",)
+        self,
+        *,
+        fail: bool = False,
+        review_decisions: tuple[str, ...] = ("pass",),
+        usage: dict[str, object] | None = None,
     ) -> None:
         self._fail = fail
         self._review_decisions = deque(review_decisions)
+        self._usage = usage or {}
         self._runs: dict[str, _FakeRun] = {}
 
     async def describe(self) -> AgentRuntimeDescriptor:
@@ -80,6 +85,7 @@ class FakeWorkerAdapter:
                 status=WorkerResultStatus.COMPLETED,
                 summary=f"Fake worker completed {request.task_id}",
                 artifacts=tuple(artifacts),
+                usage=self._usage,
             )
         self._runs[handle.id] = _FakeRun(request=request, result=result)
         return handle

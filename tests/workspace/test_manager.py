@@ -79,3 +79,26 @@ def test_candidate_requires_clean_commit_and_rejects_target_drift(tmp_path: Path
         manager.merge_candidate(
             project_root=project, default_branch="main", candidate=candidate
         )
+
+
+def test_read_only_workspace_integrity_rejects_changes(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    initialize_repo(project)
+    manager = WorkspaceManager(tmp_path / "worktrees")
+    workspace = manager.provision(
+        project_root=project,
+        default_branch="main",
+        goal_id="goal_abcdef",
+        task_id="review-target",
+    )
+    expected = manager.current_commit(workspace.path)
+
+    manager.assert_read_only_unchanged(
+        workspace_path=workspace.path, expected_commit=expected
+    )
+    (workspace.path / "unauthorized.txt").write_text("mutation\n", encoding="utf-8")
+
+    with pytest.raises(WorkspaceError, match="read-only Worker modified"):
+        manager.assert_read_only_unchanged(
+            workspace_path=workspace.path, expected_commit=expected
+        )

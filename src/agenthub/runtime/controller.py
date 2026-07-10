@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from agenthub.artifacts.store import ArtifactProvenance, ArtifactStore
@@ -148,7 +148,52 @@ class RuntimeController:
             )
         for run_id in run_ids:
             self._materialize(run_id)
+            self._reconcile_interrupted_run(run_id)
         return run_ids
+
+    def _reconcile_interrupted_run(self, run_id: str) -> None:
+        with self._session_factory() as session:
+            run = session.get(HarnessRunRecord, run_id)
+            if run is None or run.status not in {"running", "waiting"}:
+                return
+            execution = session.scalar(
+                select(StepExecutionRecord).where(
+                    StepExecutionRecord.harness_run_id == run_id,
+                    StepExecutionRecord.status == "running",
+                )
+            )
+            if execution is None:
+                return
+            mapping = session.scalar(
+                select(TaskMappingRecord).where(
+                    TaskMappingRecord.harness_run_id == run_id,
+                    TaskMappingRecord.step_id == execution.step_id,
+                )
+            )
+            goal = session.get(GoalRecord, run.goal_id)
+            if mapping is None or goal is None:
+                return
+            task = self._kanban.get_task(
+                board=mapping.kanban_board, task_id=mapping.kanban_task_id
+            )
+            if task is not None:
+                mappings = session.scalars(
+                    select(TaskMappingRecord).where(
+                        TaskMappingRecord.harness_run_id == run_id
+                    )
+                ).all()
+                for interrupted_mapping in mappings:
+                    self._kanban.archive(
+                        board=interrupted_mapping.kanban_board,
+                        task_id=interrupted_mapping.kanban_task_id,
+                    )
+            self._fail_run(
+                session,
+                run,
+                goal,
+                execution,
+                "Worker supervision was interrupted by Runtime restart",
+            )
 
     def cancel_goal(self, goal_id: str) -> dict[str, object]:
         with self._session_factory() as session:
@@ -373,6 +418,8 @@ class RuntimeController:
             if version is None or goal is None:
                 raise RuntimeExecutionError("run references missing state")
             harness = ProgressiveHarness.model_validate(version.logical_ir_json)
+            if self._enforce_run_bounds(session, run, goal, harness):
+                return True
             plan = compile_harness(harness)
             progressed = False
             for physical in plan.steps:
@@ -421,6 +468,54 @@ class RuntimeController:
                 if run.status != "running":
                     break
             return progressed
+
+    def _enforce_run_bounds(
+        self,
+        session: Session,
+        run: HarnessRunRecord,
+        goal: GoalRecord,
+        harness: ProgressiveHarness,
+    ) -> bool:
+        reason: str | None = None
+        if run.started_at is not None:
+            started_at = (
+                run.started_at.replace(tzinfo=UTC)
+                if run.started_at.tzinfo is None
+                else run.started_at
+            )
+            elapsed = (datetime.now(UTC) - started_at).total_seconds()
+            if elapsed > harness.bounds.max_wall_time_seconds:
+                reason = "Harness wall-time budget exceeded"
+        total_cost = float(
+            session.scalar(
+                select(func.coalesce(func.sum(UsageRecord.cost_usd), 0.0)).where(
+                    UsageRecord.goal_id == goal.id
+                )
+            )
+            or 0.0
+        )
+        if total_cost > harness.bounds.max_cost_usd:
+            reason = "Harness cost budget exceeded"
+        agent_runs = int(
+            session.scalar(
+                select(func.count(UsageRecord.id)).where(UsageRecord.goal_id == goal.id)
+            )
+            or 0
+        )
+        if agent_runs > harness.bounds.max_agent_runs:
+            reason = "Harness Agent Run budget exceeded"
+        if reason is None:
+            return False
+        execution = session.scalar(
+            select(StepExecutionRecord).where(
+                StepExecutionRecord.harness_run_id == run.id,
+                StepExecutionRecord.status.in_(("pending", "running", "waiting")),
+            )
+        )
+        if execution is None:
+            raise RuntimeExecutionError(reason)
+        self._fail_run(session, run, goal, execution, reason)
+        return True
 
     async def _execute_worker(
         self,
@@ -472,6 +567,16 @@ class RuntimeController:
             timeout_seconds=900,
             artifact_output_dir=self._artifacts.root / goal.id / step.id,
         )
+        review_commit: str | None = None
+        if isinstance(step, ReviewStep):
+            try:
+                review_commit = self._workspaces.current_commit(workspace_path)
+                self._workspaces.assert_read_only_unchanged(
+                    workspace_path=workspace_path, expected_commit=review_commit
+                )
+            except WorkspaceError as exc:
+                self._fail_run(session, run, goal, execution, str(exc))
+                return
         if (execution.agent_id or "").startswith("fake://"):
             handle = await self._fake_worker.start(request)
             events = [event async for event in self._fake_worker.stream_events(handle)]
@@ -504,6 +609,35 @@ class RuntimeController:
         else:
             raise RuntimeExecutionError(f"unsupported Worker binding {execution.agent_id}")
         self._record_usage(session, run, execution, mapping, result)
+        session.flush()
+        version = session.get(HarnessVersionRecord, run.harness_version_id)
+        if version is None:
+            raise RuntimeExecutionError("run Harness Version is missing")
+        harness = ProgressiveHarness.model_validate(version.logical_ir_json)
+        if self._enforce_run_bounds(session, run, goal, harness):
+            if not hermes_lane:
+                self._kanban.block(
+                    board=mapping.kanban_board,
+                    task_id=mapping.kanban_task_id,
+                    expected_run_id=worker_run_id,
+                    reason="runtime-budget-exceeded",
+                )
+            return
+        if review_commit is not None:
+            try:
+                self._workspaces.assert_read_only_unchanged(
+                    workspace_path=workspace_path, expected_commit=review_commit
+                )
+            except WorkspaceError as exc:
+                if not hermes_lane:
+                    self._kanban.block(
+                        board=mapping.kanban_board,
+                        task_id=mapping.kanban_task_id,
+                        expected_run_id=worker_run_id,
+                        reason="review-modified-workspace",
+                    )
+                self._fail_run(session, run, goal, execution, str(exc))
+                return
         for event in events:
             _append_event(
                 session,

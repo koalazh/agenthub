@@ -373,3 +373,23 @@ spawn callback.
 
 Next: Runtime budget/deadline checks, restart reconciliation, security audit,
 documentation, and final acceptance evidence.
+
+## Runtime limits and restart safety increment
+
+Commit: `feat(runtime): enforce budgets and interrupted run safety`
+
+Completed: Execution-time wall-clock, reported cost, and Agent Run budget
+checks; explicit lost-supervision reconciliation on restart; archival of all
+orphaned Kanban tasks; and deterministic read-only Review Worktree integrity
+checks before and after Reviewer execution.
+
+Tests: Cost overrun rejection, persisted wall-time overrun after restart,
+interrupted Worker reconciliation without surviving Tasks, read-only mutation
+rejection, full Python suite, Ruff, and frontend production build.
+
+Known limits: When a Backend restart loses an in-memory external Worker handle,
+the safe MVP policy is fail-and-archive rather than guessing or accepting an
+unreconstructable result. Pending, not-yet-started Runs resume idempotently.
+
+Next: Installation/profile packaging audit, API/schema acceptance matrix,
+fresh-database smoke run, and final MVP verification.
