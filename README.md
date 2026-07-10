@@ -49,6 +49,12 @@ npm install
 npm run dev
 ```
 
+Keep `agenthub serve` running in another terminal. The development UI at
+`http://127.0.0.1:5173` lists and creates Goals, shows task/Artifact/Approval
+state, and refreshes from the resumable Goal event stream. The JSON event list
+remains available by requesting `/api/goals/{goal_id}/events` without the
+`text/event-stream` Accept header.
+
 ## Hermes compatibility baseline
 
 Milestone 0 was verified against Hermes Agent source commit

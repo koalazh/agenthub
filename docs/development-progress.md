@@ -258,3 +258,19 @@ Known limits: Fake lane candidate Artifacts are intentionally non-mergeable.
 Review rejection still terminates instead of entering bounded repair.
 
 Next: Bounded Review repair state machine and loop execution.
+
+## Goal event stream and Web increment
+
+Commit: `feat(web): add goal dashboard and event stream`
+
+Completed: Resumable SSE over the persisted Goal event log, JSON compatibility
+for API clients, local development CORS, and a Goal-centric Web dashboard for
+creation, status, Harness version, task ownership, Artifacts, and Approvals.
+
+Tests: Event cursor filtering/encoding, Python lint and core suite, and the
+production frontend TypeScript/Vite build.
+
+Known limits: The dashboard intentionally exposes the current MVP control state;
+Harness authoring and interactive Approval controls remain API/MCP operations.
+
+Next: Bounded Review repair state machine and Loop execution.

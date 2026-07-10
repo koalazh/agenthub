@@ -3,6 +3,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from agenthub.api.app import create_app
+from agenthub.api.goals import encode_sse_events
 from agenthub.settings import Settings
 from tests.harness.test_validator import valid_harness
 
@@ -35,6 +36,21 @@ def harness_for(goal_id: str) -> dict[str, object]:
     payload = valid_harness()
     payload["metadata"]["goal_id"] = goal_id
     return payload
+
+
+def test_sse_encoding_resumes_after_last_event_id() -> None:
+    messages, cursor = encode_sse_events(
+        [
+            {"id": 1, "type": "goal.created", "payload": {}},
+            {"id": 2, "type": "harness.activated", "payload": {"version": 1}},
+        ],
+        cursor=1,
+    )
+
+    assert cursor == 2
+    assert len(messages) == 1
+    assert messages[0].startswith("id: 2\nevent: harness.activated\n")
+    assert '"version": 1' in messages[0]
 
 
 def patch_with_approval() -> dict[str, object]:

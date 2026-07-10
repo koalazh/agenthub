@@ -2,6 +2,7 @@ import shutil
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from agenthub import __version__
 from agenthub.api.agents import router as agents_router
@@ -52,6 +53,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         engine.dispose()
 
     app = FastAPI(title="AgentHub", version=__version__, lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.state.session_factory = session_factory
     app.state.settings = active_settings
     app.state.registry = registry

@@ -1,7 +1,10 @@
+import asyncio
+import json
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -23,6 +26,23 @@ from agenthub.harness.validator import HarnessValidationError, parse_harness
 
 router = APIRouter(prefix="/api/goals", tags=["goals"])
 SessionDependency = Annotated[Session, Depends(get_session)]
+
+
+def encode_sse_events(
+    events: list[dict[str, object]], cursor: int
+) -> tuple[list[str], int]:
+    messages: list[str] = []
+    for event in events:
+        event_id = int(event["id"])
+        if event_id <= cursor:
+            continue
+        cursor = event_id
+        messages.append(
+            f"id: {cursor}\n"
+            f"event: {event['type']}\n"
+            f"data: {json.dumps(event, default=str, ensure_ascii=False)}\n\n"
+        )
+    return messages, cursor
 
 
 class CreateGoalRequest(BaseModel):
@@ -120,11 +140,38 @@ def patch_harness_endpoint(
 
 
 @router.get("/{goal_id}/events")
-def list_events_endpoint(goal_id: str, session: SessionDependency) -> list[dict[str, object]]:
+async def list_events_endpoint(
+    goal_id: str,
+    request: Request,
+    session: SessionDependency,
+    last_event_id: Annotated[int | None, Header(alias="Last-Event-ID")] = None,
+) -> object:
     try:
-        return list_events(session, goal_id)
+        events = list_events(session, goal_id)
     except GoalNotFoundError as exc:
         raise _not_found(exc) from exc
+    if "text/event-stream" not in request.headers.get("accept", ""):
+        return events
+
+    async def stream():
+        cursor = last_event_id or 0
+        while True:
+            with request.app.state.session_factory() as polling_session:
+                current = list_events(polling_session, goal_id)
+            messages, cursor = encode_sse_events(current, cursor)
+            for message in messages:
+                yield message
+            if await request.is_disconnected():
+                return
+            if not messages:
+                yield ": heartbeat\n\n"
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/{goal_id}/execute")
