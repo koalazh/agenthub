@@ -21,6 +21,8 @@ REQUIRED_KANBAN_API = (
     "complete_task",
     "block_task",
     "archive_task",
+    "dispatch_once",
+    "add_comment",
     "list_events",
 )
 
@@ -116,7 +118,9 @@ class HermesKanbanAdapter:
     def _environment(self) -> Iterator[None]:
         with self._environment_lock:
             previous = os.environ.get("HERMES_KANBAN_HOME")
+            previous_home = os.environ.get("HERMES_HOME")
             os.environ["HERMES_KANBAN_HOME"] = str(self.hermes_home)
+            os.environ["HERMES_HOME"] = str(self.hermes_home)
             try:
                 yield
             finally:
@@ -124,6 +128,10 @@ class HermesKanbanAdapter:
                     os.environ.pop("HERMES_KANBAN_HOME", None)
                 else:
                     os.environ["HERMES_KANBAN_HOME"] = previous
+                if previous_home is None:
+                    os.environ.pop("HERMES_HOME", None)
+                else:
+                    os.environ["HERMES_HOME"] = previous_home
 
     @contextlib.contextmanager
     def _connection(self, board: str) -> Iterator[Any]:
@@ -235,6 +243,27 @@ class HermesKanbanAdapter:
     def archive(self, *, board: str, task_id: str) -> bool:
         with self._connection(board) as connection:
             return self._module.archive_task(connection, task_id)
+
+    def add_comment(self, *, board: str, task_id: str, author: str, body: str) -> int:
+        with self._connection(board) as connection:
+            return self._module.add_comment(connection, task_id, author, body)
+
+    def dispatch_once(
+        self,
+        *,
+        board: str,
+        spawn_fn: Any = None,
+        max_spawn: int | None = None,
+        max_in_progress: int | None = None,
+    ) -> Any:
+        with self._connection(board) as connection:
+            return self._module.dispatch_once(
+                connection,
+                spawn_fn=spawn_fn,
+                max_spawn=max_spawn,
+                max_in_progress=max_in_progress,
+                board=board,
+            )
 
     def list_events(self, *, board: str, task_id: str) -> list[KanbanEventSnapshot]:
         with self._connection(board) as connection:

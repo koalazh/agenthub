@@ -194,3 +194,23 @@ and remains optional in the core suite.
 
 Next: Hermes Profile Worker Adapter and reconciliation with native Dispatcher
 lifecycle.
+
+## Hermes Profile Lane increment
+
+Commit: `feat(adapter): add hermes profile worker lane`
+
+Completed: Unified Hermes Profile Worker Adapter backed by the native Hermes
+Dispatcher, explicit Agent ID-to-Profile binding, normalized Kanban lifecycle
+events, comment input, cancellation through archive, terminal result collection,
+and duplicate-event cursoring. AgentHub does not spawn a parallel Hermes loop or
+write Hermes tables.
+
+Tests: Native Dispatcher spawn callback, claim/completion normalization,
+idempotent event streaming, Profile binding, comment input, cancel/archive, and
+terminal WorkerResult mapping on a temporary real Hermes Board.
+
+Known limits: A live model-backed Profile run is credential-dependent and is
+not part of the paid-model-free core suite.
+
+Next: Agent Registry/Resolver and External Lane Supervisor with Codex and Claude
+Adapters.
