@@ -31,6 +31,9 @@ def decide_approval(
                 decision=payload.decision,
                 comment=payload.comment,
             )
+            controller = request.app.state.runtime_controller
+            if controller is not None:
+                controller.resume_approval(goal_id, approval.id)
             return {
                 "approval_id": approval.id,
                 "status": approval.status,

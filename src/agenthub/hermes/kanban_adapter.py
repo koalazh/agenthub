@@ -20,6 +20,7 @@ REQUIRED_KANBAN_API = (
     "heartbeat_claim",
     "complete_task",
     "block_task",
+    "unblock_task",
     "archive_task",
     "dispatch_once",
     "add_comment",
@@ -243,6 +244,10 @@ class HermesKanbanAdapter:
     def archive(self, *, board: str, task_id: str) -> bool:
         with self._connection(board) as connection:
             return self._module.archive_task(connection, task_id)
+
+    def unblock(self, *, board: str, task_id: str) -> bool:
+        with self._connection(board) as connection:
+            return self._module.unblock_task(connection, task_id)
 
     def add_comment(self, *, board: str, task_id: str, author: str, body: str) -> int:
         with self._connection(board) as connection:

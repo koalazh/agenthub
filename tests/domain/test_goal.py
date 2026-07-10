@@ -54,6 +54,15 @@ def test_legal_goal_lifecycle_reaches_review(tmp_path: Path) -> None:
     assert goal.status is GoalStatus.REVIEW
 
 
+def test_review_can_wait_for_approval_and_resume(tmp_path: Path) -> None:
+    goal = make_goal(tmp_path, status=GoalStatus.REVIEW)
+
+    waiting = goal.transition_to(GoalStatus.WAITING, actor="runtime")
+    resumed = waiting.transition_to(GoalStatus.RUNNING, actor="runtime")
+
+    assert resumed.status is GoalStatus.RUNNING
+
+
 def test_illegal_goal_transition_is_rejected(tmp_path: Path) -> None:
     goal = make_goal(tmp_path)
 

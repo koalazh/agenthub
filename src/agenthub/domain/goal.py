@@ -78,7 +78,13 @@ _ALLOWED_TRANSITIONS: dict[GoalStatus, frozenset[GoalStatus]] = {
         {GoalStatus.RUNNING, GoalStatus.FAILED, GoalStatus.CANCELED}
     ),
     GoalStatus.REVIEW: frozenset(
-        {GoalStatus.RUNNING, GoalStatus.COMPLETED, GoalStatus.FAILED, GoalStatus.CANCELED}
+        {
+            GoalStatus.RUNNING,
+            GoalStatus.WAITING,
+            GoalStatus.COMPLETED,
+            GoalStatus.FAILED,
+            GoalStatus.CANCELED,
+        }
     ),
     GoalStatus.COMPLETED: frozenset(),
     GoalStatus.FAILED: frozenset(),

@@ -84,6 +84,49 @@ def repair_harness(goal_id: str) -> dict[str, object]:
     return payload
 
 
+def parallel_harness(goal_id: str) -> dict[str, object]:
+    payload = executable_harness(goal_id)
+    payload["steps"][0] = {
+        "id": "analysis",
+        "kind": "parallel",
+        "branches": [
+            {
+                "id": branch_id,
+                "agent_call": {
+                    "id": branch_id,
+                    "kind": "agent_call",
+                    "task": task,
+                    "selector": {"capabilities": ["code-analysis"]},
+                    "workspace": {"mode": "read_only"},
+                    "outputs": ["analysis_report"],
+                },
+            }
+            for branch_id, task in (
+                ("code", "Inspect code"),
+                ("tests", "Inspect tests"),
+            )
+        ],
+    }
+    payload["steps"][1]["depends_on"] = ["analysis"]
+    return payload
+
+
+def approval_harness(goal_id: str) -> dict[str, object]:
+    payload = executable_harness(goal_id)
+    payload["steps"].insert(
+        -1,
+        {
+            "id": "release_approval",
+            "kind": "wait_approval",
+            "depends_on": ["review"],
+            "approval_type": "human_input",
+            "prompt": "Approve candidate finalization",
+        },
+    )
+    payload["steps"][-1]["depends_on"] = ["release_approval"]
+    return payload
+
+
 def test_fake_goal_runs_through_hermes_gate_review_and_completion(tmp_path: Path) -> None:
     project = tmp_path / "project"
     initialize_project(project)
@@ -258,6 +301,93 @@ def test_review_repair_limit_exhaustion_fails_goal(tmp_path: Path) -> None:
         for step in detail["step_executions"]
         if step["step_id"] == "finalize"
     ) == "pending"
+
+
+def test_parallel_branches_materialize_and_join_before_implementation(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    initialize_project(project)
+    with TestClient(create_app(runtime_settings(tmp_path))) as client:
+        goal_id = create_goal(client, project)
+        response = client.post(
+            f"/api/goals/{goal_id}/harness", json=parallel_harness(goal_id)
+        )
+        assert response.status_code == 201, response.text
+
+        detail = client.post(f"/api/goals/{goal_id}/execute").json()
+
+    assert detail["goal"]["status"] == "completed"
+    assert len(detail["task_mappings"]) == 7
+    executions = {step["step_id"]: step for step in detail["step_executions"]}
+    assert executions["analysis_code"]["status"] == "succeeded"
+    assert executions["analysis_tests"]["status"] == "succeeded"
+    assert executions["analysis"]["result"] == {"branches": ["code", "tests"]}
+
+
+def test_wait_approval_persists_and_resumes_harness(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    initialize_project(project)
+    settings = runtime_settings(tmp_path)
+    with TestClient(create_app(settings)) as client:
+        goal_id = create_goal(client, project)
+        response = client.post(
+            f"/api/goals/{goal_id}/harness", json=approval_harness(goal_id)
+        )
+        assert response.status_code == 201, response.text
+
+        waiting = client.post(f"/api/goals/{goal_id}/execute").json()
+        approval = next(
+            item for item in waiting["approvals"] if item["type"] == "human_input"
+        )
+        assert waiting["goal"]["status"] == "waiting"
+        assert waiting["harness_runs"][0]["status"] == "waiting"
+        assert next(
+            step["status"]
+            for step in waiting["step_executions"]
+            if step["step_id"] == "release_approval"
+        ) == "waiting"
+
+    with TestClient(create_app(settings)) as restarted_client:
+        decision = restarted_client.post(
+            f"/api/goals/{goal_id}/approvals/{approval['id']}",
+            json={"decision": "approve", "comment": "Proceed"},
+        )
+        assert decision.status_code == 200, decision.text
+        completed = restarted_client.post(f"/api/goals/{goal_id}/execute").json()
+
+    assert completed["goal"]["status"] == "completed"
+    assert next(
+        step["result"]
+        for step in completed["step_executions"]
+        if step["step_id"] == "release_approval"
+    )["approved"] is True
+
+
+def test_rejected_wait_approval_fails_harness(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    initialize_project(project)
+    with TestClient(create_app(runtime_settings(tmp_path))) as client:
+        goal_id = create_goal(client, project)
+        client.post(f"/api/goals/{goal_id}/harness", json=approval_harness(goal_id))
+        waiting = client.post(f"/api/goals/{goal_id}/execute").json()
+        approval = next(
+            item for item in waiting["approvals"] if item["type"] == "human_input"
+        )
+
+        decision = client.post(
+            f"/api/goals/{goal_id}/approvals/{approval['id']}",
+            json={"decision": "reject", "comment": "Stop"},
+        )
+        detail = client.get(f"/api/goals/{goal_id}").json()
+
+    assert decision.status_code == 200
+    assert detail["goal"]["status"] == "failed"
+    assert next(
+        step["status"]
+        for step in detail["step_executions"]
+        if step["step_id"] == "release_approval"
+    ) == "failed"
 
 
 def test_worker_failure_is_committed_by_runtime_not_adapter(tmp_path: Path) -> None:

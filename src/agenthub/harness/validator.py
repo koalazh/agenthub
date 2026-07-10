@@ -56,6 +56,7 @@ def validate_harness(
     _validate_required_steps(harness, errors)
     _validate_independence(harness, errors)
     _validate_loop_references(harness, errors)
+    _validate_physical_ids(harness, errors)
     _validate_agent_run_bound(harness, errors)
 
     if errors:
@@ -190,3 +191,30 @@ def _validate_loop_references(harness: ProgressiveHarness, errors: list[str]) ->
         review_ref = loop.body.review.inherit_from
         if not isinstance(steps.get(review_ref), ReviewStep):
             errors.append(f"loop {loop.id} inherits unknown review {review_ref}")
+
+
+def _validate_physical_ids(harness: ProgressiveHarness, errors: list[str]) -> None:
+    logical_ids = {step.id for step in harness.steps}
+    generated: list[str] = []
+    for step in harness.steps:
+        if isinstance(step, ParallelStep):
+            generated.extend(f"{step.id}_{branch.id}" for branch in step.branches)
+        elif isinstance(step, LoopStep):
+            for iteration in range(1, step.max_iterations + 1):
+                generated.extend(
+                    (
+                        f"{step.id}_repair_{iteration}",
+                        f"{step.id}_gate_{iteration}",
+                        f"{step.id}_review_{iteration}",
+                    )
+                )
+    too_long = sorted(task_id for task_id in generated if len(task_id) > 100)
+    if too_long:
+        errors.append(f"generated physical task ids exceed 100 characters: {too_long}")
+    collisions = sorted(
+        task_id
+        for task_id in set(generated)
+        if task_id in logical_ids or generated.count(task_id) > 1
+    )
+    if collisions:
+        errors.append(f"generated physical task ids collide: {collisions}")

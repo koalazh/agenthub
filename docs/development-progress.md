@@ -293,3 +293,23 @@ ReviewResult is intentionally strict JSON and rejects unstructured success text.
 
 Next: Parallel and persisted WaitApproval control flow, usage summaries, then
 recovery/security hardening and final acceptance verification.
+
+## Remaining typed control nodes increment
+
+Commit: `feat(runtime): execute parallel and approval control nodes`
+
+Completed: Physical Parallel branch expansion and fan-in, collision-safe task
+IDs, persisted WaitApproval continuation, Hermes-native block/unblock, legal
+Goal waiting/resume transitions, approval rejection failure, and restart-safe
+approval recovery without duplicate tasks or requests.
+
+Tests: Parallel branch materialization/join, approval wait across Backend
+restart, approval resume and completion, rejection failure, domain transitions,
+real Hermes compatibility, full Python suite, Ruff, and frontend build.
+
+Known limits: The local Controller may serialize otherwise independent Parallel
+branches; this stays within the declared maximum and preserves branch/fan-in
+semantics. Distributed scheduling remains out of scope.
+
+Next: Persist Usage and Handoff records, expose Goal summaries, establish a
+Gateway Channel-to-Goal link, then complete hardening and acceptance evidence.

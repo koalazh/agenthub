@@ -26,9 +26,11 @@ from agenthub.harness.schema import (
     AgentCallStep,
     FinalizeStep,
     LoopStep,
+    ParallelStep,
     ProgressiveHarness,
     ReviewStep,
     RuntimeGateStep,
+    WaitApprovalStep,
 )
 from agenthub.hermes.kanban_adapter import HermesKanbanAdapter, task_body
 from agenthub.registry.models import AgentDefinition, AgentRegistryConfig
@@ -83,11 +85,6 @@ class RuntimeController:
             if version is None:
                 raise RuntimeExecutionError("goal has no active harness")
             harness = ProgressiveHarness.model_validate(version.logical_ir_json)
-            unsupported = [step.id for step in harness.steps if step.kind == "parallel"]
-            if unsupported:
-                raise RuntimeExecutionError(
-                    f"Fake vertical slice cannot execute control nodes yet: {unsupported}"
-                )
             run = session.scalar(
                 select(HarnessRunRecord).where(
                     HarnessRunRecord.goal_id == goal_id,
@@ -295,7 +292,8 @@ class RuntimeController:
                 )
                 session.commit()
 
-            run.status = "running"
+            if run.status == "pending":
+                run.status = "running"
             domain_goal = goal_to_domain(goal)
             if domain_goal.status is GoalStatus.PLANNED:
                 domain_goal = domain_goal.transition_to(GoalStatus.RUNNING, actor="runtime")
@@ -346,6 +344,8 @@ class RuntimeController:
             with self._session_factory() as session:
                 run = session.get(HarnessRunRecord, run_id)
                 if run and run.status in {"completed", "failed", "canceled"}:
+                    return get_goal_detail(session, goal_id)
+                if run and run.status == "waiting":
                     return get_goal_detail(session, goal_id)
             if not progressed:
                 raise RuntimeExecutionError("harness run is stalled")
@@ -399,6 +399,10 @@ class RuntimeController:
                     self._finalize(session, run, goal, step, execution, mapping)
                 elif isinstance(step, LoopStep):
                     self._complete_loop(session, run, goal, step, execution, mapping)
+                elif isinstance(step, ParallelStep):
+                    self._complete_parallel(session, run, goal, step, execution, mapping)
+                elif isinstance(step, WaitApprovalStep):
+                    self._wait_for_approval(session, run, goal, step, execution, mapping)
                 else:
                     raise RuntimeExecutionError(f"step kind {step.kind} is not executable yet")
                 progressed = True
@@ -863,6 +867,227 @@ class RuntimeController:
             correlation_id=run.id,
         )
         session.commit()
+
+    def _complete_parallel(
+        self,
+        session: Session,
+        run: HarnessRunRecord,
+        goal: GoalRecord,
+        step: ParallelStep,
+        execution: StepExecutionRecord,
+        mapping: TaskMappingRecord,
+    ) -> None:
+        claimed = self._kanban.claim_task(
+            board=mapping.kanban_board,
+            task_id=mapping.kanban_task_id,
+            claimer=f"agenthub:{run.id}:{step.id}",
+            ttl_seconds=300,
+        )
+        if claimed is None or claimed.current_run_id is None:
+            return
+        mapping.expected_run_id = claimed.current_run_id
+        if not self._kanban.complete(
+            board=mapping.kanban_board,
+            task_id=mapping.kanban_task_id,
+            expected_run_id=claimed.current_run_id,
+            summary="Parallel branches completed",
+            metadata={"branches": [branch.id for branch in step.branches]},
+        ):
+            self._fail_run(session, run, goal, execution, "stale parallel completion rejected")
+            return
+        now = datetime.now(UTC)
+        execution.status = "succeeded"
+        execution.started_at = now
+        execution.ended_at = now
+        execution.result_json = {"branches": [branch.id for branch in step.branches]}
+        _append_event(
+            session,
+            goal_id=goal.id,
+            event_type="parallel.completed",
+            actor="agenthub://runtime",
+            payload={"step_id": step.id, "branches": [branch.id for branch in step.branches]},
+            correlation_id=run.id,
+        )
+        session.commit()
+
+    def _wait_for_approval(
+        self,
+        session: Session,
+        run: HarnessRunRecord,
+        goal: GoalRecord,
+        step: WaitApprovalStep,
+        execution: StepExecutionRecord,
+        mapping: TaskMappingRecord,
+    ) -> None:
+        approval = next(
+            (
+                candidate
+                for candidate in session.scalars(
+                    select(ApprovalRecord).where(
+                        ApprovalRecord.goal_id == goal.id,
+                        ApprovalRecord.type == step.approval_type,
+                    )
+                )
+                if candidate.request_json.get("step_id") == step.id
+            ),
+            None,
+        )
+        if approval is not None and approval.status == "approved":
+            claimed = self._kanban.claim_task(
+                board=mapping.kanban_board,
+                task_id=mapping.kanban_task_id,
+                claimer=f"agenthub:{run.id}:{step.id}",
+                ttl_seconds=300,
+            )
+            if claimed is None or claimed.current_run_id is None:
+                return
+            mapping.expected_run_id = claimed.current_run_id
+            if not self._kanban.complete(
+                board=mapping.kanban_board,
+                task_id=mapping.kanban_task_id,
+                expected_run_id=claimed.current_run_id,
+                summary="Approval granted",
+                metadata={"approval_id": approval.id},
+            ):
+                self._fail_run(
+                    session, run, goal, execution, "stale Approval completion rejected"
+                )
+                return
+            now = datetime.now(UTC)
+            execution.status = "succeeded"
+            execution.started_at = execution.started_at or now
+            execution.ended_at = now
+            execution.result_json = {"approval_id": approval.id, "approved": True}
+            has_completed_review = session.scalar(
+                select(StepExecutionRecord.id).where(
+                    StepExecutionRecord.harness_run_id == run.id,
+                    StepExecutionRecord.kind == "review",
+                    StepExecutionRecord.status == "succeeded",
+                )
+            )
+            domain_goal = goal_to_domain(goal)
+            if has_completed_review and domain_goal.status is GoalStatus.RUNNING:
+                domain_goal = domain_goal.transition_to(GoalStatus.REVIEW, actor="runtime")
+                goal.status = domain_goal.status
+                goal.updated_at = domain_goal.updated_at
+            _append_event(
+                session,
+                goal_id=goal.id,
+                event_type="approval.consumed",
+                actor="agenthub://runtime",
+                payload={"approval_id": approval.id, "step_id": step.id},
+                correlation_id=run.id,
+            )
+            session.commit()
+            return
+        if approval is not None and approval.status == "rejected":
+            self._fail_run(session, run, goal, execution, "Required Approval was rejected")
+            return
+        if approval is None:
+            claimed = self._kanban.claim_task(
+                board=mapping.kanban_board,
+                task_id=mapping.kanban_task_id,
+                claimer=f"agenthub:{run.id}:{step.id}",
+                ttl_seconds=300,
+            )
+            if claimed is None or claimed.current_run_id is None:
+                return
+            mapping.expected_run_id = claimed.current_run_id
+            approval = ApprovalRecord(
+                id=f"approval_{uuid4().hex}",
+                goal_id=goal.id,
+                type=step.approval_type,
+                status="pending",
+                request_json={
+                    "step_id": step.id,
+                    "harness_run_id": run.id,
+                    "prompt": step.prompt,
+                },
+                decision_json={},
+                created_at=datetime.now(UTC),
+                resolved_at=None,
+            )
+            session.add(approval)
+            if not self._kanban.block(
+                board=mapping.kanban_board,
+                task_id=mapping.kanban_task_id,
+                expected_run_id=claimed.current_run_id,
+                reason=f"approval-required:{approval.id}",
+            ):
+                self._fail_run(session, run, goal, execution, "stale Approval wait rejected")
+                return
+        execution.status = "waiting"
+        execution.started_at = execution.started_at or datetime.now(UTC)
+        execution.result_json = {"approval_id": approval.id}
+        run.status = "waiting"
+        run.current_phase = step.id
+        domain_goal = goal_to_domain(goal)
+        if domain_goal.status in {GoalStatus.RUNNING, GoalStatus.REVIEW}:
+            domain_goal = domain_goal.transition_to(GoalStatus.WAITING, actor="runtime")
+            goal.status = domain_goal.status
+            goal.updated_at = domain_goal.updated_at
+        _append_event(
+            session,
+            goal_id=goal.id,
+            event_type="approval.requested",
+            actor="agenthub://runtime",
+            payload={"approval_id": approval.id, "type": approval.type, "step_id": step.id},
+            correlation_id=run.id,
+        )
+        session.commit()
+
+    def resume_approval(self, goal_id: str, approval_id: str) -> None:
+        with self._session_factory() as session:
+            approval = session.get(ApprovalRecord, approval_id)
+            if approval is None or approval.goal_id != goal_id:
+                raise RuntimeExecutionError("approval not found")
+            step_id = approval.request_json.get("step_id")
+            run_id = approval.request_json.get("harness_run_id")
+            if not isinstance(step_id, str) or not isinstance(run_id, str):
+                return
+            run = session.get(HarnessRunRecord, run_id)
+            goal = session.get(GoalRecord, goal_id)
+            execution = self._execution_for_step(session, run_id, step_id)
+            mapping = session.scalar(
+                select(TaskMappingRecord).where(
+                    TaskMappingRecord.harness_run_id == run_id,
+                    TaskMappingRecord.step_id == step_id,
+                )
+            )
+            if run is None or goal is None or execution is None or mapping is None:
+                raise RuntimeExecutionError("approval continuation is missing Runtime state")
+            if execution.status != "waiting":
+                return
+            if approval.status == "rejected":
+                self._fail_run(session, run, goal, execution, "Required Approval was rejected")
+                return
+            if approval.status != "approved":
+                return
+            if not self._kanban.unblock(
+                board=mapping.kanban_board, task_id=mapping.kanban_task_id
+            ):
+                task = self._kanban.get_task(
+                    board=mapping.kanban_board, task_id=mapping.kanban_task_id
+                )
+                if task is None or task.status != "ready":
+                    raise RuntimeExecutionError("Approval task could not be resumed")
+            execution.status = "pending"
+            run.status = "running"
+            run.current_phase = None
+            domain_goal = goal_to_domain(goal)
+            if domain_goal.status is GoalStatus.WAITING:
+                domain_goal = domain_goal.transition_to(GoalStatus.RUNNING, actor="runtime")
+                goal.status = domain_goal.status
+                goal.updated_at = domain_goal.updated_at
+            _append_event(
+                session,
+                goal_id=goal.id,
+                event_type="approval.resumed",
+                actor="agenthub://runtime",
+                payload={"approval_id": approval.id, "step_id": step_id},
+                correlation_id=run.id,
+            )
+            session.commit()
 
     def _finalize(
         self,

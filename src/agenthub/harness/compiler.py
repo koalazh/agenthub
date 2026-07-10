@@ -3,6 +3,7 @@ from pydantic import BaseModel, ConfigDict
 from agenthub.harness.schema import (
     AgentCallStep,
     LoopStep,
+    ParallelStep,
     ProgressiveHarness,
     ReviewStep,
     RuntimeGateStep,
@@ -35,6 +36,32 @@ class PhysicalPlan(BaseModel):
 def compile_harness(harness: ProgressiveHarness) -> PhysicalPlan:
     physical_steps: list[PhysicalStep] = []
     for step in harness.steps:
+        if isinstance(step, ParallelStep):
+            branch_ids: list[str] = []
+            for branch in step.branches:
+                branch_id = f"{step.id}_{branch.id}"
+                branch_ids.append(branch_id)
+                physical_steps.append(
+                    PhysicalStep(
+                        id=branch_id,
+                        kind="agent_call",
+                        depends_on=step.depends_on,
+                        workspace_mode=branch.agent_call.workspace.mode,
+                        logical_step_id=step.id,
+                        loop_phase=f"parallel:{branch.id}",
+                    )
+                )
+            physical_steps.append(
+                PhysicalStep(
+                    id=step.id,
+                    kind="parallel",
+                    depends_on=tuple(branch_ids),
+                    workspace_mode=None,
+                    logical_step_id=step.id,
+                    loop_phase="parallel:complete",
+                )
+            )
+            continue
         if not isinstance(step, LoopStep):
             physical_steps.append(
                 PhysicalStep(
@@ -101,6 +128,9 @@ def compile_harness(harness: ProgressiveHarness) -> PhysicalPlan:
             )
         )
 
+    physical_ids = [step.id for step in physical_steps]
+    if len(set(physical_ids)) != len(physical_ids):
+        raise ValueError("compiled physical task ids are not unique")
     by_id = {step.id: step for step in physical_steps}
     pending = set(by_id)
     ordered: list[PhysicalStep] = []
@@ -133,6 +163,14 @@ def resolve_physical_step(
     harness: ProgressiveHarness, physical: PhysicalStep
 ) -> object:
     logical = next(step for step in harness.steps if step.id == physical.logical_step_id)
+    if isinstance(logical, ParallelStep):
+        if physical.loop_phase == "parallel:complete":
+            return logical
+        branch_id = str(physical.loop_phase).removeprefix("parallel:")
+        branch = next(branch for branch in logical.branches if branch.id == branch_id)
+        return branch.agent_call.model_copy(
+            update={"id": physical.id, "depends_on": physical.depends_on}
+        )
     if not isinstance(logical, LoopStep):
         return logical
     if physical.loop_phase == "repair":
