@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     data_dir: Path = Path("~/.agenthub")
     database_url: str = "sqlite:///~/.agenthub/agenthub.db"
     hermes_api_base_url: str = "http://127.0.0.1:8642"
+    hermes_api_key: SecretStr | None = None
     hermes_source_path: Path | None = None
     hermes_kanban_home: Path = Path("~/.hermes")
     hermes_probe_timeout_seconds: float = Field(default=1.0, gt=0, le=10)

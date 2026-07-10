@@ -8,6 +8,7 @@ from agenthub import __version__
 from agenthub.api.agents import router as agents_router
 from agenthub.api.approvals import router as approvals_router
 from agenthub.api.artifacts import router as artifacts_router
+from agenthub.api.chat import router as chat_router
 from agenthub.api.goals import router as goals_router
 from agenthub.artifacts.store import ArtifactStore
 from agenthub.db.base import check_database, create_database_engine, create_session_factory
@@ -62,6 +63,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.session_factory = session_factory
     app.state.settings = active_settings
     app.state.registry = registry
+    app.state.hermes_http_transport = None
     external_adapters = {}
     if "claude" in available_runtimes:
         external_adapters["claude://default"] = ClaudeWorkerAdapter()
@@ -93,6 +95,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(agents_router)
     app.include_router(approvals_router)
     app.include_router(artifacts_router)
+    app.include_router(chat_router)
     app.include_router(goals_router)
 
     @app.get("/health")

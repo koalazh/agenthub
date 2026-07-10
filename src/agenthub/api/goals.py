@@ -69,6 +69,10 @@ class GoalOrigin(BaseModel):
     external_user_id: str | None = Field(default=None, max_length=200)
 
 
+class AttachSessionRequest(GoalOrigin):
+    relation: str = Field(default="attached", pattern=r"^(origin|attached|delivery)$")
+
+
 def _not_found(exc: GoalNotFoundError) -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"goal {exc} not found")
 
@@ -112,6 +116,25 @@ def get_goal_endpoint(goal_id: str, session: SessionDependency) -> dict[str, obj
         return get_goal_detail(session, goal_id)
     except GoalNotFoundError as exc:
         raise _not_found(exc) from exc
+
+
+@router.post("/{goal_id}/sessions", status_code=status.HTTP_201_CREATED)
+def attach_goal_session(
+    goal_id: str, payload: AttachSessionRequest, session: SessionDependency
+) -> dict[str, object]:
+    try:
+        get_goal_detail(session, goal_id)
+    except GoalNotFoundError as exc:
+        raise _not_found(exc) from exc
+    link = link_goal_session(
+        session,
+        goal_id=goal_id,
+        session_key=payload.session_key,
+        channel=payload.channel,
+        external_user_id=payload.external_user_id,
+        relation=payload.relation,
+    )
+    return {"id": link.id, "goal_id": goal_id, "session_key": link.session_key}
 
 
 @router.post("/{goal_id}/harness", status_code=status.HTTP_201_CREATED)

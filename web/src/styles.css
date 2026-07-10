@@ -12,6 +12,7 @@ body {
 aside { background: #111820; color: white; padding: 1.5rem; }
 aside h1 { margin-top: 0; }
 form, nav { display: grid; gap: .65rem; margin-bottom: 1.5rem; }
+.chat-form { grid-template-columns: 1fr auto; margin-bottom: 0; }
 textarea, input, button { border: 0; border-radius: .5rem; padding: .75rem; font: inherit; }
 textarea { min-height: 5rem; resize: vertical; }
 button { cursor: pointer; }

@@ -332,3 +332,23 @@ only when the Worker runtime reports `cost_usd`; AgentHub does not invent prices
 
 Next: Thin Hermes Runs API chat proxy and Channel attachment API, then limits,
 reconciliation hardening, documentation, and final acceptance verification.
+
+## Hermes chat and Channel link increment
+
+Commit: `feat(channel): proxy hermes runs and link goal sessions`
+
+Completed: Thin `/api/chat` Hermes Runs proxy, pollable Run status, optional API
+key/session-key forwarding, Web Hub Chat status, idempotent Channel attachment,
+and origin metadata in the Hub MCP Goal proposal. Hermes remains the sole Hub
+Agent and Gateway session owner.
+
+Tests: Upstream Runs request/response contract, upstream rejection propagation,
+Goal attachment, attachment idempotency, MCP compatibility, full Python suite,
+Ruff, and frontend production build.
+
+Known limits: The Hermes API Server must be running under the `agenthub-hub`
+Profile and requires provider credentials for a live model turn. Core tests use
+an HTTP transport fake and do not make paid calls.
+
+Next: Enforce run/cost/concurrency bounds, reconcile Hermes/External state after
+restart, audit installation docs, and execute the final acceptance matrix.

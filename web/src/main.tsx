@@ -24,6 +24,9 @@ function App() {
   const [selected, setSelected] = useState<GoalDetail | null>(null);
   const [objective, setObjective] = useState("");
   const [projectRoot, setProjectRoot] = useState("");
+  const [message, setMessage] = useState("");
+  const [chatRun, setChatRun] = useState<string | null>(null);
+  const [chatStatus, setChatStatus] = useState<string | null>(null);
 
   async function loadGoals() {
     const response = await fetch(`${API}/api/goals`);
@@ -54,6 +57,18 @@ function App() {
     return () => events.close();
   }, [selected?.goal.id]);
 
+  useEffect(() => {
+    if (!chatRun) return;
+    const poll = window.setInterval(async () => {
+      const response = await fetch(`${API}/api/chat/runs/${chatRun}`);
+      if (!response.ok) return;
+      const run = await response.json();
+      setChatStatus(run.status);
+      if (["completed", "failed", "cancelled"].includes(run.status)) window.clearInterval(poll);
+    }, 1000);
+    return () => window.clearInterval(poll);
+  }, [chatRun]);
+
   async function createGoal(event: FormEvent) {
     event.preventDefault();
     const response = await fetch(`${API}/api/goals`, {
@@ -71,6 +86,26 @@ function App() {
     setObjective("");
     await loadGoals();
     await selectGoal(created.goal_id);
+  }
+
+  async function startChat(event: FormEvent) {
+    event.preventDefault();
+    if (!selected) return;
+    const response = await fetch(`${API}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        input: message,
+        goal_id: selected.goal.id,
+        session_key: `agent:main:web:${selected.goal.id}`,
+        channel: "web",
+      }),
+    });
+    if (!response.ok) return;
+    const run = await response.json();
+    setChatRun(run.run_id);
+    setChatStatus(run.status);
+    setMessage("");
   }
 
   return (
@@ -115,6 +150,14 @@ function App() {
               </div>
             </header>
             <section><h3>Objective</h3><p>{selected.goal.contract.objective}</p></section>
+            <section>
+              <h3>Hub Chat</h3>
+              <form onSubmit={startChat} className="chat-form">
+                <input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Send a message to agenthub-hub" required />
+                <button type="submit">Start Hermes Run</button>
+              </form>
+              {chatRun && <p>Hermes Run: <code>{chatRun}</code> · {chatStatus}</p>}
+            </section>
             <section>
               <h3>Task Board</h3>
               <div className="task-grid">

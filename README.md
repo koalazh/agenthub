@@ -35,6 +35,12 @@ uv run agenthub mcp-server
 Set `AGENTHUB_API_BASE_URL` if the Backend is not at
 `http://127.0.0.1:8787`.
 
+Run the Hermes API Server with `agenthub-hub` as its active Profile before
+using `/api/chat` or the Web Hub Chat. AgentHub forwards chat turns to Hermes
+`/v1/runs`; it does not embed another Agent loop. If the Hermes server requires
+authentication, set the same key in `AGENTHUB_HERMES_API_KEY`. The Backend then
+forwards the stable `X-Hermes-Session-Key` for Profile Memory scoping.
+
 Worker routing defaults to the paid-model-free Fake lane. Set
 `AGENTHUB_DEFAULT_WORKER_LANE` to `hermes`, `claude`, or `codex` to opt into a
 configured real Worker. Codex uses its documented `exec --json` CLI fallback

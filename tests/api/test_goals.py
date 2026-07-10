@@ -136,6 +136,23 @@ def test_create_goal_persists_origin_session_link(tmp_path: Path) -> None:
     ]
 
 
+def test_attach_additional_goal_session_is_idempotent(tmp_path: Path) -> None:
+    with TestClient(create_app(settings_for(tmp_path))) as client:
+        goal_id = create_goal(client, tmp_path)
+        payload = {
+            "channel": "telegram",
+            "session_key": "agent:main:telegram:dm:123",
+            "relation": "delivery",
+        }
+        first = client.post(f"/api/goals/{goal_id}/sessions", json=payload)
+        second = client.post(f"/api/goals/{goal_id}/sessions", json=payload)
+        detail = client.get(f"/api/goals/{goal_id}").json()
+
+    assert first.status_code == 201
+    assert second.json()["id"] == first.json()["id"]
+    assert len(detail["session_links"]) == 1
+
+
 def test_patch_creates_immutable_auditable_version(tmp_path: Path) -> None:
     with TestClient(create_app(settings_for(tmp_path))) as client:
         goal_id = create_goal(client, tmp_path)

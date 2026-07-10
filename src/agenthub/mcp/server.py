@@ -84,12 +84,14 @@ def agenthub_create_goal(
     prohibited_actions: list[str] | None = None,
     required_evidence: list[str] | None = None,
     delivery_mode: str = "candidate_commit",
+    origin_session: str | None = None,
+    origin_channel: str | None = None,
+    external_user_id: str | None = None,
 ) -> dict[str, object]:
     """Submit a typed Goal proposal; Runtime validates and persists it."""
     client = _client()
     try:
-        return client.create_goal(
-            {
+        proposal: dict[str, object] = {
                 "objective": objective,
                 "project_root": project_root,
                 "acceptance_criteria": acceptance_criteria,
@@ -98,7 +100,13 @@ def agenthub_create_goal(
                 "required_evidence": required_evidence,
                 "delivery_mode": delivery_mode,
             }
-        )
+        if origin_session and origin_channel:
+            proposal["origin"] = {
+                "session_key": origin_session,
+                "channel": origin_channel,
+                "external_user_id": external_user_id,
+            }
+        return client.create_goal(proposal)
     finally:
         client.close()
 
