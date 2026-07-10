@@ -10,3 +10,4 @@ agenthub.db
 web/node_modules/
 web/dist/
 web/*.tsbuildinfo
+.hermes-source/

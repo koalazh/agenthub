@@ -134,3 +134,26 @@ state; only Runtime will perform that commit in the next increment.
 
 Next: HarnessRun/StepExecution/TaskMapping persistence and the reconciled Fake
 vertical slice with deterministic Runtime Gate.
+
+## Hermes Fake vertical slice increment
+
+Commit: `feat(runtime): execute fake harness on hermes kanban`
+
+Completed: Recoverable HarnessRun/StepExecution/TaskMapping state, idempotent
+Physical Plan materialization into Hermes Kanban, isolated Git Worktrees for
+write tasks, projected local TaskEnvelope, Runtime-owned Worker result commit,
+deterministic Gate execution, independent fake Review, Completion Policy,
+Artifact API, restart reconciliation, and Goal cancellation.
+
+Tests: Full Goal-to-completed path on real Hermes Kanban, five Task mappings,
+candidate/Test/Review Artifact requirements, independent Reviewer, Worktree
+branch isolation and idempotency, restart without duplicate Tasks, Gate failure,
+Worker failure, cancellation/archival, and Artifact retrieval. CI checks out the
+pinned Hermes commit so these tests do not silently skip there.
+
+Known limits: The Fake slice rejects `parallel` and `loop` execution; bounded
+repair-loop execution arrives with Review hardening. Candidate Commit content is
+a Fake Artifact until the real Worker/Worktree delivery increments.
+
+Next: Hermes Hub Profile, Orchestrator Skill/MCP tools, TaskEnvelope/Handoff
+schema, and real Hermes Profile Worker lane.

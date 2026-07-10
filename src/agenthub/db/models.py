@@ -77,3 +77,55 @@ class ArtifactRecord(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
+
+
+class HarnessRunRecord(Base):
+    __tablename__ = "harness_runs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    goal_id: Mapped[str] = mapped_column(ForeignKey("goals.id"), nullable=False, index=True)
+    harness_version_id: Mapped[str] = mapped_column(
+        ForeignKey("harness_versions.id"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    current_phase: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    checkpoint_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class StepExecutionRecord(Base):
+    __tablename__ = "step_executions"
+    __table_args__ = (UniqueConstraint("harness_run_id", "step_id", "attempt"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    harness_run_id: Mapped[str] = mapped_column(
+        ForeignKey("harness_runs.id"), nullable=False, index=True
+    )
+    step_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False)
+    kanban_task_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    agent_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    result_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+
+
+class TaskMappingRecord(Base):
+    __tablename__ = "task_mappings"
+    __table_args__ = (UniqueConstraint("harness_run_id", "step_id"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    goal_id: Mapped[str] = mapped_column(ForeignKey("goals.id"), nullable=False, index=True)
+    harness_version_id: Mapped[str] = mapped_column(
+        ForeignKey("harness_versions.id"), nullable=False
+    )
+    harness_run_id: Mapped[str] = mapped_column(
+        ForeignKey("harness_runs.id"), nullable=False, index=True
+    )
+    step_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    kanban_board: Mapped[str] = mapped_column(String(64), nullable=False)
+    kanban_task_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    expected_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

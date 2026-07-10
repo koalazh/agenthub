@@ -7,7 +7,15 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from agenthub.db.models import EventRecord, GoalRecord, HarnessVersionRecord
+from agenthub.db.models import (
+    ArtifactRecord,
+    EventRecord,
+    GoalRecord,
+    HarnessRunRecord,
+    HarnessVersionRecord,
+    StepExecutionRecord,
+    TaskMappingRecord,
+)
 from agenthub.domain.goal import DeliveryMode, DeliveryPolicy, Goal, GoalContract, GoalStatus
 from agenthub.harness.compiler import compile_harness
 from agenthub.harness.patcher import PatchHarnessProposal, apply_patch
@@ -274,6 +282,25 @@ def get_goal_detail(session: Session, goal_id: str) -> dict[str, object]:
         .where(HarnessVersionRecord.goal_id == goal_id)
         .order_by(HarnessVersionRecord.version)
     ).all()
+    runs = session.scalars(
+        select(HarnessRunRecord)
+        .where(HarnessRunRecord.goal_id == goal_id)
+        .order_by(HarnessRunRecord.started_at)
+    ).all()
+    executions = session.scalars(
+        select(StepExecutionRecord)
+        .join(HarnessRunRecord, StepExecutionRecord.harness_run_id == HarnessRunRecord.id)
+        .where(HarnessRunRecord.goal_id == goal_id)
+        .order_by(StepExecutionRecord.id)
+    ).all()
+    mappings = session.scalars(
+        select(TaskMappingRecord).where(TaskMappingRecord.goal_id == goal_id)
+    ).all()
+    artifacts = session.scalars(
+        select(ArtifactRecord)
+        .where(ArtifactRecord.goal_id == goal_id)
+        .order_by(ArtifactRecord.created_at)
+    ).all()
     return {
         "goal": goal.model_dump(mode="json"),
         "harness_versions": [serialize_harness_version(version) for version in versions],
@@ -285,6 +312,55 @@ def get_goal_detail(session: Session, goal_id: str) -> dict[str, object]:
             ),
             None,
         ),
+        "harness_runs": [
+            {
+                "id": run.id,
+                "harness_version_id": run.harness_version_id,
+                "status": run.status,
+                "current_phase": run.current_phase,
+                "checkpoint": run.checkpoint_json,
+                "started_at": _utc(run.started_at) if run.started_at else None,
+                "ended_at": _utc(run.ended_at) if run.ended_at else None,
+            }
+            for run in runs
+        ],
+        "step_executions": [
+            {
+                "id": execution.id,
+                "harness_run_id": execution.harness_run_id,
+                "step_id": execution.step_id,
+                "kind": execution.kind,
+                "status": execution.status,
+                "attempt": execution.attempt,
+                "kanban_task_id": execution.kanban_task_id,
+                "agent_id": execution.agent_id,
+                "result": execution.result_json,
+            }
+            for execution in executions
+        ],
+        "task_mappings": [
+            {
+                "step_id": mapping.step_id,
+                "kanban_board": mapping.kanban_board,
+                "kanban_task_id": mapping.kanban_task_id,
+                "expected_run_id": mapping.expected_run_id,
+            }
+            for mapping in mappings
+        ],
+        "artifacts": [
+            {
+                "id": artifact.id,
+                "task_id": artifact.task_id,
+                "run_id": artifact.run_id,
+                "kind": artifact.kind,
+                "uri": artifact.uri,
+                "sha256": artifact.sha256,
+                "media_type": artifact.media_type,
+                "size_bytes": artifact.size_bytes,
+                "created_by_agent": artifact.created_by_agent,
+            }
+            for artifact in artifacts
+        ],
     }
 
 

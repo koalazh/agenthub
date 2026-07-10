@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -125,3 +125,31 @@ def list_events_endpoint(goal_id: str, session: SessionDependency) -> list[dict[
         return list_events(session, goal_id)
     except GoalNotFoundError as exc:
         raise _not_found(exc) from exc
+
+
+@router.post("/{goal_id}/execute")
+async def execute_goal_endpoint(goal_id: str, request: Request) -> dict[str, object]:
+    controller = request.app.state.runtime_controller
+    if controller is None:
+        raise HTTPException(
+            status_code=503,
+            detail=request.app.state.runtime_error or "Hermes Runtime is unavailable",
+        )
+    try:
+        return await controller.run_fake_until_terminal(goal_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/{goal_id}/cancel")
+def cancel_goal_endpoint(goal_id: str, request: Request) -> dict[str, object]:
+    controller = request.app.state.runtime_controller
+    if controller is None:
+        raise HTTPException(
+            status_code=503,
+            detail=request.app.state.runtime_error or "Hermes Runtime is unavailable",
+        )
+    try:
+        return controller.cancel_goal(goal_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

@@ -20,6 +20,7 @@ REQUIRED_KANBAN_API = (
     "heartbeat_claim",
     "complete_task",
     "block_task",
+    "archive_task",
     "list_events",
 )
 
@@ -230,6 +231,10 @@ class HermesKanbanAdapter:
             return self._module.block_task(
                 connection, task_id, reason=reason, expected_run_id=expected_run_id
             )
+
+    def archive(self, *, board: str, task_id: str) -> bool:
+        with self._connection(board) as connection:
+            return self._module.archive_task(connection, task_id)
 
     def list_events(self, *, board: str, task_id: str) -> list[KanbanEventSnapshot]:
         with self._connection(board) as connection:

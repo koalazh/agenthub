@@ -1,0 +1,1 @@
+"""Isolated Git workspace management."""

@@ -14,7 +14,14 @@ jobs:
           python-version: "3.12"
       - run: uv sync --extra dev --locked
       - run: uv run ruff check .
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: 2a8d2174173ab8d05d0b48a44580a8c0b2c8c19b
+          path: .hermes-source
       - run: uv run pytest
+        env:
+          HERMES_SOURCE_PATH: ${{ github.workspace }}/.hermes-source
 
   frontend:
     runs-on: ubuntu-latest
