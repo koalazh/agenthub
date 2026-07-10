@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from agenthub.harness.compiler import compile_harness
 from agenthub.harness.schema import ProgressiveHarness
 from agenthub.harness.validator import (
     HarnessPolicy,
@@ -173,6 +174,22 @@ def test_loop_inherits_existing_gate_review_and_binding() -> None:
     harness = parse_harness(payload)
 
     validate_harness(harness, goal_id="goal_test")
+
+    plan = compile_harness(harness)
+    assert [step.id for step in plan.steps] == [
+        "inspect",
+        "implement",
+        "checks",
+        "review",
+        "repair_repair_1",
+        "repair_gate_1",
+        "repair_review_1",
+        "repair_repair_2",
+        "repair_gate_2",
+        "repair_review_2",
+        "repair",
+        "finalize",
+    ]
 
 
 def test_loop_cannot_inherit_unknown_gate() -> None:

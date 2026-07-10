@@ -60,6 +60,30 @@ def executable_harness(goal_id: str, *, gate_passes: bool = True) -> dict[str, o
     return payload
 
 
+def repair_harness(goal_id: str) -> dict[str, object]:
+    payload = executable_harness(goal_id)
+    payload["steps"].insert(
+        -1,
+        {
+            "id": "repair",
+            "kind": "loop",
+            "depends_on": ["review"],
+            "max_iterations": 2,
+            "continue_when": "review_requires_changes",
+            "body": {
+                "agent_call": {
+                    "task": "Repair review findings",
+                    "selector": {"prefer_binding_from": "implement"},
+                },
+                "runtime_gate": {"inherit_from": "checks"},
+                "review": {"inherit_from": "review"},
+            },
+        },
+    )
+    payload["steps"][-1]["depends_on"] = ["repair"]
+    return payload
+
+
 def test_fake_goal_runs_through_hermes_gate_review_and_completion(tmp_path: Path) -> None:
     project = tmp_path / "project"
     initialize_project(project)
@@ -170,6 +194,72 @@ def test_runtime_gate_failure_prevents_goal_completion(tmp_path: Path) -> None:
     ) == "pending"
 
 
+def test_review_rejection_runs_bounded_repair_then_completes(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    initialize_project(project)
+    app = create_app(runtime_settings(tmp_path))
+    app.state.runtime_controller._fake_worker = FakeWorkerAdapter(
+        review_decisions=("changes_required", "pass")
+    )
+    with TestClient(app) as client:
+        goal_id = create_goal(client, project)
+        response = client.post(
+            f"/api/goals/{goal_id}/harness", json=repair_harness(goal_id)
+        )
+        assert response.status_code == 201, response.text
+
+        detail = client.post(f"/api/goals/{goal_id}/execute").json()
+        events = client.get(f"/api/goals/{goal_id}/events").json()
+
+    assert detail["goal"]["status"] == "completed"
+    assert len(detail["task_mappings"]) == 12
+    assert {step["status"] for step in detail["step_executions"]} == {"succeeded"}
+    skipped = {
+        step["step_id"]
+        for step in detail["step_executions"]
+        if step["result"].get("skipped")
+    }
+    assert skipped == {"repair_repair_2", "repair_gate_2", "repair_review_2"}
+    mappings = {item["step_id"]: item for item in detail["task_mappings"]}
+    assert mappings["repair_repair_1"]["workspace_path"] == mappings["implement"][
+        "workspace_path"
+    ]
+    assert mappings["repair_repair_1"]["branch_name"] == mappings["implement"][
+        "branch_name"
+    ]
+    assert len(list((app.state.settings.data_dir / "worktrees").glob("*/*"))) == 1
+    assert [
+        event["payload"]["decision"]
+        for event in events
+        if event["type"] == "review.completed"
+    ] == ["changes_required", "pass"]
+    assert any(event["type"] == "loop.completed" for event in events)
+
+
+def test_review_repair_limit_exhaustion_fails_goal(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    initialize_project(project)
+    app = create_app(runtime_settings(tmp_path))
+    app.state.runtime_controller._fake_worker = FakeWorkerAdapter(
+        review_decisions=("changes_required", "changes_required", "changes_required")
+    )
+    with TestClient(app) as client:
+        goal_id = create_goal(client, project)
+        client.post(f"/api/goals/{goal_id}/harness", json=repair_harness(goal_id))
+
+        detail = client.post(f"/api/goals/{goal_id}/execute").json()
+
+    assert detail["goal"]["status"] == "failed"
+    assert next(
+        step for step in detail["step_executions"] if step["step_id"] == "repair"
+    )["result"]["failure"].startswith("Review repair limit exhausted")
+    assert next(
+        step["status"]
+        for step in detail["step_executions"]
+        if step["step_id"] == "finalize"
+    ) == "pending"
+
+
 def test_worker_failure_is_committed_by_runtime_not_adapter(tmp_path: Path) -> None:
     project = tmp_path / "project"
     initialize_project(project)
@@ -255,13 +345,20 @@ def test_codex_implementation_and_claude_review_execute_through_supervisor(
     initialize_project(project)
     settings = runtime_settings(tmp_path).model_copy(update={"default_worker_lane": "codex"})
     app = create_app(settings)
-    def command(worker_request: object, _output: Path) -> list[str]:
+    def command(worker_request: object, output: Path) -> list[str]:
         if worker_request.task_id == "implement":
             script = (
                 "import json,subprocess; from pathlib import Path; "
                 "Path('implemented.txt').write_text('candidate\\n'); "
                 "subprocess.run(['git','add','implemented.txt'],check=True); "
                 "subprocess.run(['git','commit','-m','feat: candidate'],check=True); "
+                "print(json.dumps({'type':'turn.completed','usage':{'input_tokens':1}}))"
+            )
+        elif "review" in worker_request.task_id:
+            script = (
+                "import json; from pathlib import Path; "
+                f"Path({str(output)!r}).write_text(json.dumps("
+                "{'decision':'pass','findings':[]})); "
                 "print(json.dumps({'type':'turn.completed','usage':{'input_tokens':1}}))"
             )
         else:

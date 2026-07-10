@@ -21,10 +21,11 @@ from agenthub.db.models import (
 from agenthub.db.repositories import _append_event, get_goal_detail, goal_to_domain
 from agenthub.domain.goal import GoalStatus
 from agenthub.gates.runner import GateRunner
-from agenthub.harness.compiler import compile_harness
+from agenthub.harness.compiler import PhysicalStep, compile_harness, resolve_physical_step
 from agenthub.harness.schema import (
     AgentCallStep,
     FinalizeStep,
+    LoopStep,
     ProgressiveHarness,
     ReviewStep,
     RuntimeGateStep,
@@ -82,7 +83,7 @@ class RuntimeController:
             if version is None:
                 raise RuntimeExecutionError("goal has no active harness")
             harness = ProgressiveHarness.model_validate(version.logical_ir_json)
-            unsupported = [step.id for step in harness.steps if step.kind in {"parallel", "loop"}]
+            unsupported = [step.id for step in harness.steps if step.kind == "parallel"]
             if unsupported:
                 raise RuntimeExecutionError(
                     f"Fake vertical slice cannot execute control nodes yet: {unsupported}"
@@ -105,7 +106,7 @@ class RuntimeController:
                     ended_at=None,
                 )
                 session.add(run)
-                for step in harness.steps:
+                for step in compile_harness(harness).steps:
                     session.add(
                         StepExecutionRecord(
                             id=f"se_{uuid4().hex}",
@@ -202,7 +203,6 @@ class RuntimeController:
             harness = ProgressiveHarness.model_validate(version.logical_ir_json)
             board = self._kanban.ensure_board(project_root=Path(goal.project_root))
             ordered = compile_harness(harness).steps
-            by_id = {step.id: step for step in harness.steps}
 
             for physical in ordered:
                 existing = session.scalar(
@@ -213,7 +213,7 @@ class RuntimeController:
                 )
                 if existing is not None:
                     continue
-                step = by_id[physical.id]
+                step = resolve_physical_step(harness, physical)
                 parent_mappings = [
                     session.scalar(
                         select(TaskMappingRecord).where(
@@ -221,16 +221,17 @@ class RuntimeController:
                             TaskMappingRecord.step_id == parent,
                         )
                     )
-                    for parent in step.depends_on
+                    for parent in physical.depends_on
                 ]
                 if any(parent is None for parent in parent_mappings):
                     raise RuntimeExecutionError(f"step {step.id} parent mapping is missing")
                 parent_ids = tuple(parent.kanban_task_id for parent in parent_mappings if parent)
                 workspace_kind, workspace_path, branch_name, base_commit = (
                     self._workspace_for_step(
-                    step=step,
-                    goal=goal,
-                    parent_mappings=[parent for parent in parent_mappings if parent],
+                        step=step,
+                        goal=goal,
+                        parent_mappings=[parent for parent in parent_mappings if parent],
+                        reuse_parent_workspace=physical.loop_phase == "repair",
                     )
                 )
                 outputs = self._outputs(step)
@@ -253,7 +254,7 @@ class RuntimeController:
                     idempotency_key=f"{goal.id}:{version.version}:{step.id}:1",
                     workspace_kind=workspace_kind,
                     workspace_path=workspace_path,
-                    branch_name=branch_name,
+                    branch_name=branch_name if workspace_kind == "worktree" else None,
                     max_runtime_seconds=harness.bounds.max_wall_time_seconds,
                 )
                 execution = session.scalar(
@@ -308,9 +309,14 @@ class RuntimeController:
         step: object,
         goal: GoalRecord,
         parent_mappings: list[TaskMappingRecord],
+        reuse_parent_workspace: bool = False,
     ) -> tuple[str, str | None, str | None, str | None]:
         project_root = Path(goal.project_root)
-        if isinstance(step, AgentCallStep) and step.workspace.mode == "write_candidate":
+        if (
+            isinstance(step, AgentCallStep)
+            and step.workspace.mode == "write_candidate"
+            and not reuse_parent_workspace
+        ):
             workspace = self._workspaces.provision(
                 project_root=project_root,
                 default_branch=goal.default_branch,
@@ -323,7 +329,12 @@ class RuntimeController:
                 board=parent.kanban_board, task_id=parent.kanban_task_id
             )
             if snapshot and snapshot.workspace_path:
-                return "dir", snapshot.workspace_path, None, None
+                return (
+                    "dir",
+                    snapshot.workspace_path,
+                    parent.branch_name,
+                    parent.base_commit,
+                )
         return "dir", str(project_root), None, None
 
     async def run_fake_until_terminal(
@@ -350,10 +361,10 @@ class RuntimeController:
             if version is None or goal is None:
                 raise RuntimeExecutionError("run references missing state")
             harness = ProgressiveHarness.model_validate(version.logical_ir_json)
-            by_id = {step.id: step for step in harness.steps}
-            ordered_ids = [step.id for step in compile_harness(harness).steps]
+            plan = compile_harness(harness)
             progressed = False
-            for step_id in ordered_ids:
+            for physical in plan.steps:
+                step_id = physical.id
                 execution = session.scalar(
                     select(StepExecutionRecord).where(
                         StepExecutionRecord.harness_run_id == run.id,
@@ -374,13 +385,20 @@ class RuntimeController:
                 )
                 if task is None or task.status != "ready":
                     continue
-                step = by_id[step_id]
+                step = resolve_physical_step(harness, physical)
+                if physical.loop_id and physical.loop_phase != "complete":
+                    if self._should_skip_loop_step(session, run, physical):
+                        self._skip_step(session, run, goal, execution, mapping)
+                        progressed = True
+                        continue
                 if isinstance(step, (AgentCallStep, ReviewStep)):
                     await self._execute_worker(session, run, goal, step, execution, mapping)
                 elif isinstance(step, RuntimeGateStep):
                     self._execute_gate(session, run, goal, step, execution, mapping)
                 elif isinstance(step, FinalizeStep):
                     self._finalize(session, run, goal, step, execution, mapping)
+                elif isinstance(step, LoopStep):
+                    self._complete_loop(session, run, goal, step, execution, mapping)
                 else:
                     raise RuntimeExecutionError(f"step kind {step.kind} is not executable yet")
                 progressed = True
@@ -463,6 +481,20 @@ class RuntimeController:
             self._fail_run(session, run, goal, execution, result.summary)
             return
 
+        review_decision: str | None = None
+        if isinstance(step, ReviewStep):
+            try:
+                review_decision = self._parse_review_decision(result.artifacts)
+            except RuntimeExecutionError as exc:
+                self._kanban.block(
+                    board=mapping.kanban_board,
+                    task_id=mapping.kanban_task_id,
+                    expected_run_id=claimed.current_run_id,
+                    reason=f"review-invalid: {exc}",
+                )
+                self._fail_run(session, run, goal, execution, str(exc))
+                return
+
         candidate_metadata: dict[str, object] | None = None
         produced_artifacts = result.artifacts
         if (
@@ -513,7 +545,9 @@ class RuntimeController:
                 )
                 for artifact in result.artifacts
             )
-        self._record_agent_stats(session, execution, step, result)
+        self._record_agent_stats(
+            session, execution, step, result, review_decision=review_decision
+        )
 
         artifact_uris: list[str] = []
         for produced in produced_artifacts:
@@ -553,11 +587,14 @@ class RuntimeController:
             return
         execution.status = "succeeded"
         execution.ended_at = datetime.now(UTC)
-        execution.result_json = result.model_dump(mode="json", exclude={"artifacts"})
+        result_json = result.model_dump(mode="json", exclude={"artifacts"})
+        if review_decision is not None:
+            result_json["review_decision"] = review_decision
+        execution.result_json = result_json
         event_type = "review.completed" if isinstance(step, ReviewStep) else "step.completed"
         payload: dict[str, object] = {"step_id": step.id}
         if isinstance(step, ReviewStep):
-            payload["decision"] = "pass"
+            payload["decision"] = review_decision
         _append_event(
             session,
             goal_id=goal.id,
@@ -574,6 +611,7 @@ class RuntimeController:
         execution: StepExecutionRecord,
         step: AgentCallStep | ReviewStep,
         result: object,
+        review_decision: str | None = None,
     ) -> None:
         if not execution.agent_id or execution.agent_id.startswith("fake://"):
             return
@@ -595,7 +633,8 @@ class RuntimeController:
             stats.recent_failure_count = 0
             if isinstance(step, ReviewStep):
                 stats.verifier_total_count += 1
-                stats.verifier_pass_count += 1
+                if review_decision == "pass":
+                    stats.verifier_pass_count += 1
         else:
             stats.recent_failure_count += 1
         stats.last_used_at = now
@@ -672,6 +711,158 @@ class RuntimeController:
                 reason="runtime-gate-failed",
             )
             self._fail_run(session, run, goal, execution, "Runtime gate failed")
+
+    @staticmethod
+    def _parse_review_decision(artifacts: tuple[ProducedArtifact, ...]) -> str:
+        reports = [artifact for artifact in artifacts if artifact.kind == "review_report"]
+        if not reports:
+            raise RuntimeExecutionError("review Worker did not produce review_report")
+        for report in reports:
+            text = report.content.decode(errors="replace").strip()
+            candidates = [text, *reversed(text.splitlines())]
+            for candidate in candidates:
+                try:
+                    payload = json.loads(candidate)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                decision = payload.get("decision")
+                findings = payload.get("findings")
+                if decision in {"pass", "changes_required"} and isinstance(findings, list):
+                    return decision
+        raise RuntimeExecutionError("review_report does not satisfy ReviewResult contract")
+
+    @staticmethod
+    def _execution_for_step(
+        session: Session, run_id: str, step_id: str
+    ) -> StepExecutionRecord | None:
+        return session.scalar(
+            select(StepExecutionRecord).where(
+                StepExecutionRecord.harness_run_id == run_id,
+                StepExecutionRecord.step_id == step_id,
+                StepExecutionRecord.attempt == 1,
+            )
+        )
+
+    def _should_skip_loop_step(
+        self, session: Session, run: HarnessRunRecord, physical: PhysicalStep
+    ) -> bool:
+        parent = self._execution_for_step(session, run.id, physical.depends_on[0])
+        if parent is None:
+            raise RuntimeExecutionError(f"loop step {physical.id} parent execution is missing")
+        if physical.loop_phase == "repair":
+            return (
+                parent.result_json.get("review_decision") == "pass"
+                or parent.result_json.get("skipped") is True
+            )
+        return parent.result_json.get("skipped") is True
+
+    def _skip_step(
+        self,
+        session: Session,
+        run: HarnessRunRecord,
+        goal: GoalRecord,
+        execution: StepExecutionRecord,
+        mapping: TaskMappingRecord,
+    ) -> None:
+        claimed = self._kanban.claim_task(
+            board=mapping.kanban_board,
+            task_id=mapping.kanban_task_id,
+            claimer=f"agenthub:{run.id}:{execution.step_id}",
+            ttl_seconds=300,
+        )
+        if claimed is None or claimed.current_run_id is None:
+            return
+        mapping.expected_run_id = claimed.current_run_id
+        if not self._kanban.complete(
+            board=mapping.kanban_board,
+            task_id=mapping.kanban_task_id,
+            expected_run_id=claimed.current_run_id,
+            summary="Loop iteration not required",
+            metadata={"skipped": True},
+        ):
+            self._fail_run(session, run, goal, execution, "stale loop skip rejected")
+            return
+        now = datetime.now(UTC)
+        execution.status = "succeeded"
+        execution.started_at = now
+        execution.ended_at = now
+        execution.result_json = {"skipped": True}
+        _append_event(
+            session,
+            goal_id=goal.id,
+            event_type="step.skipped",
+            actor="agenthub://runtime",
+            payload={"step_id": execution.step_id, "reason": "review_passed"},
+            correlation_id=run.id,
+        )
+        session.commit()
+
+    def _complete_loop(
+        self,
+        session: Session,
+        run: HarnessRunRecord,
+        goal: GoalRecord,
+        step: LoopStep,
+        execution: StepExecutionRecord,
+        mapping: TaskMappingRecord,
+    ) -> None:
+        review_ids = [*step.depends_on]
+        review_ids.extend(
+            f"{step.id}_review_{iteration}"
+            for iteration in range(1, step.max_iterations + 1)
+        )
+        decisions = [
+            candidate.result_json.get("review_decision")
+            for review_id in review_ids
+            if (candidate := self._execution_for_step(session, run.id, review_id)) is not None
+            and candidate.result_json.get("skipped") is not True
+        ]
+        if not decisions or decisions[-1] != "pass":
+            self._fail_run(
+                session,
+                run,
+                goal,
+                execution,
+                f"Review repair limit exhausted after {step.max_iterations} rounds",
+            )
+            return
+        claimed = self._kanban.claim_task(
+            board=mapping.kanban_board,
+            task_id=mapping.kanban_task_id,
+            claimer=f"agenthub:{run.id}:{step.id}",
+            ttl_seconds=300,
+        )
+        if claimed is None or claimed.current_run_id is None:
+            return
+        mapping.expected_run_id = claimed.current_run_id
+        if not self._kanban.complete(
+            board=mapping.kanban_board,
+            task_id=mapping.kanban_task_id,
+            expected_run_id=claimed.current_run_id,
+            summary="Bounded Review repair policy satisfied",
+            metadata={"rounds": len(decisions) - 1},
+        ):
+            self._fail_run(session, run, goal, execution, "stale loop completion rejected")
+            return
+        now = datetime.now(UTC)
+        execution.status = "succeeded"
+        execution.started_at = now
+        execution.ended_at = now
+        execution.result_json = {
+            "review_decision": "pass",
+            "repair_rounds": len(decisions) - 1,
+        }
+        _append_event(
+            session,
+            goal_id=goal.id,
+            event_type="loop.completed",
+            actor="agenthub://runtime",
+            payload={"step_id": step.id, "repair_rounds": len(decisions) - 1},
+            correlation_id=run.id,
+        )
+        session.commit()
 
     def _finalize(
         self,
@@ -824,6 +1015,21 @@ class RuntimeController:
             return None
         if self._registry is None:
             raise RuntimeExecutionError("Agent Registry is unavailable")
+        if selector.prefer_binding_from is not None:
+            preferred_execution = self._execution_for_step(
+                session, run.id, selector.prefer_binding_from
+            )
+            preferred_id = preferred_execution.agent_id if preferred_execution else None
+            if preferred_id is None or preferred_id.startswith("fake://"):
+                return None
+            preferred = next(
+                (agent for agent in self._registry.agents if agent.id == preferred_id), None
+            )
+            if preferred is None:
+                raise RuntimeExecutionError(
+                    f"preferred Agent binding {preferred_id} is unavailable"
+                )
+            return preferred
         excluded_ids: set[str] = set()
         for excluded_step in selector.exclude_agents_from:
             execution = session.scalar(

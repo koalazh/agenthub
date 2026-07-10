@@ -49,6 +49,19 @@ def project_task_envelope(
         ),
         output_contract=OutputContract(
             kind="review" if is_review else "worker_result",
+            schema=(
+                {
+                    "type": "object",
+                    "required": ["decision", "findings"],
+                    "properties": {
+                        "decision": {"enum": ["pass", "changes_required"]},
+                        "findings": {"type": "array"},
+                    },
+                    "additionalProperties": False,
+                }
+                if is_review
+                else {}
+            ),
             artifact_dir=str(workspace_path),
             artifacts=step.outputs,
         ),

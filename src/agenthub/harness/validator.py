@@ -175,6 +175,12 @@ def _validate_agent_run_bound(harness: ProgressiveHarness, errors: list[str]) ->
 def _validate_loop_references(harness: ProgressiveHarness, errors: list[str]) -> None:
     steps = {step.id: step for step in harness.steps}
     for loop in (step for step in harness.steps if isinstance(step, LoopStep)):
+        if len(loop.id) > 84:
+            errors.append(f"loop {loop.id} id is too long for physical iteration tasks")
+        if len(loop.depends_on) != 1 or not isinstance(
+            steps.get(loop.depends_on[0]) if loop.depends_on else None, ReviewStep
+        ):
+            errors.append(f"loop {loop.id} must depend on exactly one review step")
         binding_ref = loop.body.agent_call.selector.prefer_binding_from
         if binding_ref is not None and not isinstance(steps.get(binding_ref), AgentCallStep):
             errors.append(f"loop {loop.id} prefers unknown agent binding {binding_ref}")

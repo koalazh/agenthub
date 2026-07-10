@@ -1,3 +1,5 @@
+import json
+from collections import deque
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from uuid import uuid4
@@ -23,8 +25,11 @@ class _FakeRun:
 
 
 class FakeWorkerAdapter:
-    def __init__(self, *, fail: bool = False) -> None:
+    def __init__(
+        self, *, fail: bool = False, review_decisions: tuple[str, ...] = ("pass",)
+    ) -> None:
         self._fail = fail
+        self._review_decisions = deque(review_decisions)
         self._runs: dict[str, _FakeRun] = {}
 
     async def describe(self) -> AgentRuntimeDescriptor:
@@ -45,18 +50,36 @@ class FakeWorkerAdapter:
             )
         else:
             outputs = request.task_envelope.get("output_contract", {}).get("artifacts", [])
-            artifacts = tuple(
-                ProducedArtifact(
-                    kind=str(kind),
-                    filename=f"{kind}.txt",
-                    content=f"Fake artifact for {request.task_id}: {kind}\n".encode(),
-                )
-                for kind in outputs
-            )
+            artifacts: list[ProducedArtifact] = []
+            for kind in outputs:
+                if kind == "review_report":
+                    decision = (
+                        self._review_decisions.popleft()
+                        if self._review_decisions
+                        else "pass"
+                    )
+                    artifacts.append(
+                        ProducedArtifact(
+                            kind="review_report",
+                            filename="review_report.json",
+                            media_type="application/json",
+                            content=json.dumps(
+                                {"decision": decision, "findings": []}
+                            ).encode(),
+                        )
+                    )
+                else:
+                    artifacts.append(
+                        ProducedArtifact(
+                            kind=str(kind),
+                            filename=f"{kind}.txt",
+                            content=f"Fake artifact for {request.task_id}: {kind}\n".encode(),
+                        )
+                    )
             result = WorkerResult(
                 status=WorkerResultStatus.COMPLETED,
                 summary=f"Fake worker completed {request.task_id}",
-                artifacts=artifacts,
+                artifacts=tuple(artifacts),
             )
         self._runs[handle.id] = _FakeRun(request=request, result=result)
         return handle

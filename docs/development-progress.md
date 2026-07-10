@@ -274,3 +274,22 @@ Known limits: The dashboard intentionally exposes the current MVP control state;
 Harness authoring and interactive Approval controls remain API/MCP operations.
 
 Next: Bounded Review repair state machine and Loop execution.
+
+## Bounded Review repair increment
+
+Commit: `feat(runtime): execute bounded review repair loops`
+
+Completed: Physical expansion of typed Loop IR into Hermes repair, Runtime Gate,
+and independent Review tasks; structured ReviewResult validation; early skip on
+approval; same-Worktree repair with preserved candidate provenance; preferred
+executor reuse; and Runtime failure when the declared repair bound is exhausted.
+
+Tests: Loop compilation, changes-required then pass, repeated rejection at the
+two-round limit, shared Worktree identity, normalized Review events, full Python
+suite, Ruff, and frontend production build.
+
+Known limits: Parallel and WaitApproval control nodes are still not executable.
+ReviewResult is intentionally strict JSON and rejects unstructured success text.
+
+Next: Parallel and persisted WaitApproval control flow, usage summaries, then
+recovery/security hardening and final acceptance verification.
