@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from agenthub.artifacts.store import ArtifactProvenance, ArtifactStore
+from agenthub.context.projector import project_task_envelope
 from agenthub.db.models import (
     ArtifactRecord,
     GoalRecord,
@@ -398,7 +399,7 @@ class RuntimeController:
             kanban_task_id=mapping.kanban_task_id,
             expected_run_id=claimed.current_run_id,
             agent_id=execution.agent_id or "fake://default",
-            task_envelope=self._task_envelope(goal, run, step),
+            task_envelope=self._task_envelope(goal, run, step, workspace_path),
             workspace_path=workspace_path,
             timeout_seconds=900,
             artifact_output_dir=self._artifacts.root / goal.id / step.id,
@@ -688,35 +689,12 @@ class RuntimeController:
         goal: GoalRecord,
         run: HarnessRunRecord,
         step: AgentCallStep | ReviewStep,
+        workspace_path: Path,
     ) -> dict[str, object]:
-        return {
-            "identity": {
-                "goal_id": goal.id,
-                "task_id": step.id,
-                "run_id": run.id,
-                "role": "reviewer" if isinstance(step, ReviewStep) else "worker",
-            },
-            "objective": {"statement": self._objective(step)},
-            "goal_context": {"summary": goal.objective, "relevance": step.id},
-            "acceptance_criteria": goal.contract_json.get("acceptance_criteria", []),
-            "constraints": {
-                "permissions": {
-                    "repository": (
-                        "write_candidate"
-                        if isinstance(step, AgentCallStep)
-                        and step.workspace.mode == "write_candidate"
-                        else "read_only"
-                    )
-                },
-                "prohibited_actions": goal.contract_json.get("prohibited_actions", []),
-            },
-            "output_contract": {"artifacts": list(self._outputs(step))},
-            "escalation": {
-                "allowed_proposals": [
-                    "request_context",
-                    "request_capability",
-                    "spawn_task",
-                    "report_blocker",
-                ]
-            },
-        }
+        envelope = project_task_envelope(
+            goal=goal_to_domain(goal),
+            run_id=run.id,
+            step=step,
+            workspace_path=workspace_path,
+        )
+        return envelope.model_dump(mode="json", by_alias=True)

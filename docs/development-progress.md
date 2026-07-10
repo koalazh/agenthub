@@ -157,3 +157,21 @@ a Fake Artifact until the real Worker/Worktree delivery increments.
 
 Next: Hermes Hub Profile, Orchestrator Skill/MCP tools, TaskEnvelope/Handoff
 schema, and real Hermes Profile Worker lane.
+
+## Context projection and Hermes Profiles increment
+
+Commit: `feat(context): add task envelopes and hermes profiles`
+
+Completed: Strict TaskEnvelope v1 and Handoff v1 models/schemas, 8 KB Handoff
+bound, least-context projection without global Harness state, installable
+`agenthub-hub` and `hermes-reviewer` Hermes Profile distributions, and the Hub
+Orchestrator Skill with Proposal/Runtime boundaries.
+
+Tests: Local projection permissions and Artifact authorization, absence of
+global Harness fields, Handoff size rejection, committed-schema consistency,
+pinned Hermes manifest parsing, MCP declaration, and credential/Memory exclusion.
+
+Known limits: The declared `agenthub mcp-server` command and Hermes Profile
+Worker Adapter are implemented in the following increments.
+
+Next: AgentHub Control MCP proposal tools, followed by the Hermes Profile Lane.

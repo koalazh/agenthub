@@ -1,0 +1,10 @@
+{
+  "servers": {
+    "agenthub": {
+      "command": "agenthub",
+      "args": ["mcp-server"],
+      "env": {},
+      "enabled": true
+    }
+  }
+}

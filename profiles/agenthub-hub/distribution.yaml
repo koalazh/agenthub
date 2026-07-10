@@ -1,0 +1,6 @@
+name: agenthub-hub
+version: 0.1.0
+description: "AgentHub Goal clarification and typed Progressive Harness planner"
+hermes_requires: ">=0.14.0"
+author: "AgentHub"
+license: "MIT"

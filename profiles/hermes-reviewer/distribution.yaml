@@ -1,0 +1,6 @@
+name: hermes-reviewer
+version: 0.1.0
+description: "Independent read-only semantic reviewer for AgentHub candidates"
+hermes_requires: ">=0.14.0"
+author: "AgentHub"
+license: "MIT"

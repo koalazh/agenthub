@@ -1,0 +1,285 @@
+{
+  "$defs": {
+    "EscalationPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_proposals": {
+          "items": {
+            "enum": [
+              "request_context",
+              "request_capability",
+              "spawn_task",
+              "report_blocker"
+            ],
+            "type": "string"
+          },
+          "title": "Allowed Proposals",
+          "type": "array"
+        }
+      },
+      "required": [
+        "allowed_proposals"
+      ],
+      "title": "EscalationPolicy",
+      "type": "object"
+    },
+    "GoalContext": {
+      "additionalProperties": false,
+      "properties": {
+        "relevance": {
+          "minLength": 1,
+          "title": "Relevance",
+          "type": "string"
+        },
+        "summary": {
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "summary",
+        "relevance"
+      ],
+      "title": "GoalContext",
+      "type": "object"
+    },
+    "OutputContract": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_dir": {
+          "title": "Artifact Dir",
+          "type": "string"
+        },
+        "artifacts": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema": {
+          "additionalProperties": true,
+          "default": {},
+          "title": "Schema",
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind",
+        "artifact_dir",
+        "artifacts"
+      ],
+      "title": "OutputContract",
+      "type": "object"
+    },
+    "Permissions": {
+      "additionalProperties": false,
+      "properties": {
+        "network": {
+          "default": "deny",
+          "enum": [
+            "deny",
+            "allow",
+            "allowlist"
+          ],
+          "title": "Network",
+          "type": "string"
+        },
+        "network_allowlist": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Network Allowlist",
+          "type": "array"
+        },
+        "repository": {
+          "enum": [
+            "read_only",
+            "write_candidate"
+          ],
+          "title": "Repository",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository"
+      ],
+      "title": "Permissions",
+      "type": "object"
+    },
+    "TaskConstraints": {
+      "additionalProperties": false,
+      "properties": {
+        "deadline": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Deadline"
+        },
+        "permissions": {
+          "$ref": "#/$defs/Permissions"
+        },
+        "prohibited_actions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Prohibited Actions",
+          "type": "array"
+        },
+        "token_budget": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Token Budget"
+        }
+      },
+      "required": [
+        "permissions"
+      ],
+      "title": "TaskConstraints",
+      "type": "object"
+    },
+    "TaskIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "goal_id": {
+          "title": "Goal Id",
+          "type": "string"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "goal_id",
+        "task_id",
+        "run_id",
+        "role"
+      ],
+      "title": "TaskIdentity",
+      "type": "object"
+    },
+    "TaskInputs": {
+      "additionalProperties": false,
+      "properties": {
+        "artifacts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "handoffs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Handoffs",
+          "type": "array"
+        }
+      },
+      "title": "TaskInputs",
+      "type": "object"
+    },
+    "TaskObjective": {
+      "additionalProperties": false,
+      "properties": {
+        "statement": {
+          "minLength": 1,
+          "title": "Statement",
+          "type": "string"
+        }
+      },
+      "required": [
+        "statement"
+      ],
+      "title": "TaskObjective",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "acceptance_criteria": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Acceptance Criteria",
+      "type": "array"
+    },
+    "api_version": {
+      "const": "agenthub.io/task-envelope/v1",
+      "default": "agenthub.io/task-envelope/v1",
+      "title": "Api Version",
+      "type": "string"
+    },
+    "constraints": {
+      "$ref": "#/$defs/TaskConstraints"
+    },
+    "escalation": {
+      "$ref": "#/$defs/EscalationPolicy"
+    },
+    "goal_context": {
+      "$ref": "#/$defs/GoalContext"
+    },
+    "identity": {
+      "$ref": "#/$defs/TaskIdentity"
+    },
+    "inputs": {
+      "$ref": "#/$defs/TaskInputs",
+      "default": {
+        "artifacts": [],
+        "handoffs": []
+      }
+    },
+    "objective": {
+      "$ref": "#/$defs/TaskObjective"
+    },
+    "output_contract": {
+      "$ref": "#/$defs/OutputContract"
+    }
+  },
+  "required": [
+    "identity",
+    "objective",
+    "goal_context",
+    "acceptance_criteria",
+    "constraints",
+    "output_contract",
+    "escalation"
+  ],
+  "title": "TaskEnvelope",
+  "type": "object"
+}
