@@ -155,6 +155,7 @@ def test_fake_goal_runs_through_hermes_gate_review_and_completion(tmp_path: Path
             "candidate_commit",
             "test-log",
             "review_report",
+            "goal_summary",
         }
         assert detail["usage_summary"] == {
             "input_tokens": 0,

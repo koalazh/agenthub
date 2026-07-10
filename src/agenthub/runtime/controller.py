@@ -1430,12 +1430,49 @@ class RuntimeController:
         if claimed is None or claimed.current_run_id is None:
             return
         mapping.expected_run_id = claimed.current_run_id
+        goal_summary = {
+            "goal_id": goal.id,
+            "harness_run_id": run.id,
+            "harness_version_id": run.harness_version_id,
+            "completion_policy": "passed",
+            "delivery": step.delivery,
+            "artifact_kinds": sorted(artifact_kinds),
+            "step_count": len(executions),
+        }
+        summary_artifact = self._artifacts.publish(
+            session,
+            provenance=ArtifactProvenance(
+                goal_id=goal.id,
+                task_id=step.id,
+                run_id=f"{mapping.kanban_board}:{claimed.current_run_id}",
+                created_by_agent="agenthub://completion-controller",
+            ),
+            kind="goal_summary",
+            media_type="application/json",
+            content=json.dumps(goal_summary, indent=2).encode(),
+            metadata={"completion_policy": "passed"},
+        )
+        _append_event(
+            session,
+            goal_id=goal.id,
+            event_type="artifact.published",
+            actor="agenthub://completion-controller",
+            payload={
+                "step_id": step.id,
+                "artifact_id": summary_artifact.id,
+                "kind": summary_artifact.kind,
+            },
+            correlation_id=run.id,
+        )
         if not self._kanban.complete(
             board=mapping.kanban_board,
             task_id=mapping.kanban_task_id,
             expected_run_id=claimed.current_run_id,
             summary="Completion policy satisfied",
-            metadata={"artifact_kinds": sorted(artifact_kinds)},
+            metadata={
+                "artifact_kinds": sorted((*artifact_kinds, "goal_summary")),
+                "artifacts": [summary_artifact.uri],
+            },
         ):
             self._fail_run(session, run, goal, execution, "stale finalize completion rejected")
             return
@@ -1443,7 +1480,10 @@ class RuntimeController:
         execution.status = "succeeded"
         execution.started_at = now
         execution.ended_at = now
-        execution.result_json = {"completion_policy": "passed"}
+        execution.result_json = {
+            "completion_policy": "passed",
+            "goal_summary_artifact_id": summary_artifact.id,
+        }
         run.status = "completed"
         run.current_phase = "finalize"
         run.ended_at = now

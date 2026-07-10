@@ -414,3 +414,19 @@ credential-dependent; all core acceptance evidence is paid-model-free.
 Next: MVP implementation is complete. Use the explicit merge Approval flow for
 candidate delivery; production deployment and automatic publishing remain out
 of scope by design.
+
+## Goal Summary delivery increment
+
+Commit: `feat(delivery): publish completion goal summary`
+
+Completed: Finalize now publishes a provenance-bearing JSON `goal_summary`
+Artifact with Harness Run/Version, delivery mode, evidence kinds, and step
+count before the Completion Controller marks the Goal completed.
+
+Tests: The end-to-end software Goal requires and retrieves candidate Commit,
+test log, independent Review report, and Goal Summary; all 90 Python tests,
+Ruff, and frontend build pass.
+
+Known limits: None within the approved MVP scope.
+
+Next: MVP implementation is complete.

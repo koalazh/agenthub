@@ -14,7 +14,7 @@ This file maps its MVP completion criteria to executable evidence.
 | Deterministic tests and Runtime Gate | Shell-free Gate Runner and required test-log Artifact | `tests/gates`, Gate failure Runtime test |
 | Independent semantic Review | Agent exclusion, strict ReviewResult, read-only integrity check | Harness and Runtime Review tests |
 | Bounded repair | Typed Loop physical expansion with repair/gate/review rounds | Review repair pass/exhaustion Runtime tests |
-| Candidate Commit and explicit merge | Verified Commit metadata, durable Approval, fast-forward-only merge | candidate approval Runtime tests |
+| Candidate Commit, Goal Summary, and explicit merge | Verified Commit metadata, Completion Controller summary Artifact, durable Approval, fast-forward-only merge | candidate approval Runtime tests |
 | Cancellation and waiting | Kanban archive, persisted WaitApproval, Hermes unblock | cancellation and Approval Runtime tests |
 | Restart recovery | Idempotent materialization and explicit lost-supervision reconciliation | restart Runtime tests |
 | API, Web, SSE, and Channel link | Goal APIs, resumable events, Hermes Runs proxy, session links | API tests and frontend build |
